@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 568" width="960" height="568">
+<style>
+text{font-family:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Droid Sans Fallback",sans-serif;fill:#1f2328}
+.t{font-size:17px;font-weight:600}
+.n{font-size:13.5px;font-weight:600}
+.s{font-size:11.5px;fill:#57606a}
+.q{font-size:11.5px;fill:#57606a}
+.box{fill:#fff;stroke:#8c959f;stroke-width:1.2}
+.acc{fill:#ddf4ff;stroke:#0969da;stroke-width:2}
+.cont{fill:none;stroke:#8c959f;stroke-width:1;stroke-dasharray:5 4}
+.res{fill:#fff;stroke:#8c959f;stroke-width:1.2;stroke-dasharray:4 3}
+.ln{fill:none;stroke:#57606a;stroke-width:1.3}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#57606a"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text class="t" x="24" y="36">内核很小，能力都来自插件</text>
+<rect class="box" x="240" y="60" width="480" height="52" rx="8"/>
+<text class="n" x="252" y="81">接口层</text>
+<text class="s" x="252" y="98">HTTP API（面板）· CLI</text>
+<path class="ln" d="M480 112V136" marker-end="url(#a)"/>
+<rect class="cont" x="240" y="140" width="480" height="164" rx="8"/>
+<text class="n" x="254" y="162">运行时 continuum.runtime</text>
+<rect class="box" x="252" y="174" width="144" height="52" rx="8"/>
+<text class="n" x="264" y="195">组装 Runtime</text>
+<text class="s" x="264" y="212">启动 · 关闭</text>
+<rect class="box" x="408" y="174" width="144" height="52" rx="8"/>
+<text class="n" x="420" y="195">插件注册表</text>
+<text class="s" x="420" y="212">按扩展点登记</text>
+<rect class="box" x="564" y="174" width="144" height="52" rx="8"/>
+<text class="n" x="576" y="195">调度循环</text>
+<text class="s" x="576" y="212">每 2 秒一轮</text>
+<rect class="box" x="252" y="238" width="144" height="52" rx="8"/>
+<text class="n" x="264" y="259">Store</text>
+<text class="s" x="264" y="276">SQLite · 可换 PG</text>
+<rect class="box" x="408" y="238" width="144" height="52" rx="8"/>
+<text class="n" x="420" y="259">Effects 队列</text>
+<text class="s" x="420" y="276">先存再做 · 退避重试</text>
+<rect class="box" x="564" y="238" width="144" height="52" rx="8"/>
+<text class="n" x="576" y="259">Outbox</text>
+<text class="s" x="576" y="276">对外消息有序</text>
+<path class="ln" d="M480 304V320" marker-end="url(#a)"/>
+<rect class="acc" x="240" y="324" width="480" height="196" rx="8"/>
+<text class="n" x="254" y="348">领域内核 continuum.core（无 I/O · 同步事务）</text>
+<rect class="box" x="252" y="362" width="82" height="40" rx="8"/>
+<text class="s" x="293" y="387" text-anchor="middle">Intake</text>
+<path class="ln" d="M334 382H344" marker-end="url(#a)"/>
+<rect class="box" x="344" y="362" width="82" height="40" rx="8"/>
+<text class="s" x="385" y="387" text-anchor="middle">Evals</text>
+<path class="ln" d="M426 382H436" marker-end="url(#a)"/>
+<rect class="box" x="436" y="362" width="82" height="40" rx="8"/>
+<text class="s" x="477" y="387" text-anchor="middle">Tickets</text>
+<path class="ln" d="M518 382H528" marker-end="url(#a)"/>
+<rect class="box" x="528" y="362" width="82" height="40" rx="8"/>
+<text class="s" x="569" y="387" text-anchor="middle">Assignments</text>
+<path class="ln" d="M610 382H620" marker-end="url(#a)"/>
+<rect class="box" x="620" y="362" width="82" height="40" rx="8"/>
+<text class="s" x="661" y="387" text-anchor="middle">Replies</text>
+<text class="q" x="254" y="420">Engine：唯一写入者，按角色给出视图</text>
+<rect class="box" x="252" y="432" width="144" height="52" rx="8"/>
+<text class="n" x="264" y="453">领域模型</text>
+<text class="s" x="264" y="470">Trigger · Ticket · Mandate</text>
+<rect class="box" x="408" y="432" width="144" height="52" rx="8"/>
+<text class="n" x="420" y="453">Policy · Gate 链</text>
+<text class="s" x="420" y="470">代码定强度</text>
+<rect class="box" x="564" y="432" width="144" height="52" rx="8"/>
+<text class="n" x="576" y="453">端口协议</text>
+<text class="s" x="576" y="470">Protocol · 领域事件</text>
+<text class="q" x="254" y="506">依赖规则：core 不 import 其他层；插件之间不互相 import</text>
+<text class="n" x="24" y="132">插件 · 入口侧</text>
+<rect class="box" x="24" y="144" width="184" height="50" rx="8"/>
+<text class="n" x="36" y="165">Source</text>
+<text class="s" x="36" y="182">飞书·邮件·OS 屏幕</text>
+<path class="ln" d="M208 169H224"/>
+<rect class="box" x="24" y="206" width="184" height="50" rx="8"/>
+<text class="n" x="36" y="227">GateRule</text>
+<text class="s" x="36" y="244">白名单·准入表</text>
+<path class="ln" d="M208 231H224"/>
+<rect class="box" x="24" y="268" width="184" height="50" rx="8"/>
+<text class="n" x="36" y="289">ProactiveRule</text>
+<text class="s" x="36" y="306">主动接活规则</text>
+<path class="ln" d="M208 293H224"/>
+<rect class="box" x="24" y="330" width="184" height="50" rx="8"/>
+<text class="n" x="36" y="351">Assessor</text>
+<text class="s" x="36" y="368">LLM Router·分类器</text>
+<path class="ln" d="M208 355H224"/>
+<rect class="res" x="24" y="392" width="184" height="50" rx="8"/>
+<text class="n" x="36" y="413">MemoryProvider</text>
+<text class="s" x="36" y="430">预留：Context Graph</text>
+<path class="ln" d="M208 417H224"/>
+<rect class="res" x="24" y="454" width="184" height="50" rx="8"/>
+<text class="n" x="36" y="475">GoalStore</text>
+<text class="s" x="36" y="492">预留：Goal Engine</text>
+<path class="ln" d="M208 479H224"/>
+<path class="ln" d="M224 169V483"/>
+<path class="ln" d="M224 222H240" marker-end="url(#a)"/>
+<text class="n" x="752" y="132">插件 · 出口侧</text>
+<rect class="box" x="752" y="144" width="184" height="50" rx="8"/>
+<text class="n" x="764" y="165">ExecutorKind</text>
+<text class="s" x="764" y="182">agent·script·Codex·人</text>
+<path class="ln" d="M752 169H736"/>
+<rect class="box" x="752" y="206" width="184" height="50" rx="8"/>
+<text class="n" x="764" y="227">ToolProvider</text>
+<text class="s" x="764" y="244">函数工具·MCP</text>
+<path class="ln" d="M752 231H736"/>
+<rect class="box" x="752" y="268" width="184" height="50" rx="8"/>
+<text class="n" x="764" y="289">ModelProvider</text>
+<text class="s" x="764" y="306">DeepSeek·Anthropic</text>
+<path class="ln" d="M752 293H736"/>
+<rect class="box" x="752" y="330" width="184" height="50" rx="8"/>
+<text class="n" x="764" y="351">EffectHandler</text>
+<text class="s" x="764" y="368">launch·reply·审计</text>
+<path class="ln" d="M752 355H736"/>
+<rect class="box" x="752" y="392" width="184" height="50" rx="8"/>
+<text class="n" x="764" y="413">EventSubscriber</text>
+<text class="s" x="764" y="430">日志·面板推送</text>
+<path class="ln" d="M752 417H736"/>
+<rect class="box" x="752" y="454" width="184" height="50" rx="8"/>
+<text class="n" x="764" y="475">Repositories</text>
+<text class="s" x="764" y="492">内存·SQLite·PG</text>
+<path class="ln" d="M752 479H736"/>
+<path class="ln" d="M736 169V483"/>
+<path class="ln" d="M736 222H720" marker-end="url(#a)"/>
+<text class="q" x="24" y="548">每个插件只拿到收窄的 Context：Engine 的一个角色视图 + 自己命名空间下的状态和健康项。虚线框为预留扩展点。</text>
+</svg>

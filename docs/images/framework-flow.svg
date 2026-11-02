@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 460" width="960" height="460">
+<style>
+text{font-family:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Droid Sans Fallback",sans-serif;fill:#1f2328}
+.t{font-size:17px;font-weight:600}
+.n{font-size:13.5px;font-weight:600}
+.s{font-size:11.5px;fill:#57606a}
+.q{font-size:11.5px;fill:#57606a}
+.box{fill:#fff;stroke:#8c959f;stroke-width:1.2}
+.acc{fill:#ddf4ff;stroke:#0969da;stroke-width:2}
+.cont{fill:none;stroke:#8c959f;stroke-width:1;stroke-dasharray:5 4}
+.res{fill:#fff;stroke:#8c959f;stroke-width:1.2;stroke-dasharray:4 3}
+.ln{fill:none;stroke:#57606a;stroke-width:1.3}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#57606a"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text class="t" x="24" y="36">代码先定强度，模型再做判断；人的跟进不重复判定</text>
+<rect class="box" x="24" y="176" width="136" height="64" rx="8"/>
+<text class="n" x="36" y="197">Source 插件</text>
+<text class="s" x="36" y="214">飞书 · 邮件 · OS</text>
+<text class="s" x="36" y="229">产出 Trigger</text>
+<rect class="box" x="184" y="176" width="136" height="64" rx="8"/>
+<text class="n" x="196" y="197">入库 Intake</text>
+<text class="s" x="196" y="214">不可变 Trigger</text>
+<text class="s" x="196" y="229">按 id 去重</text>
+<rect class="box" x="344" y="176" width="136" height="64" rx="8"/>
+<text class="n" x="356" y="197">Thread</text>
+<text class="s" x="356" y="214">同一时间一个 Eval</text>
+<text class="s" x="356" y="229">期间消息并批</text>
+<rect class="cont" x="500" y="148" width="264" height="128" rx="8"/>
+<text class="n" x="512" y="168">Eval</text>
+<rect class="box" x="508" y="180" width="118" height="64" rx="8"/>
+<text class="n" x="520" y="201">Gate（代码）</text>
+<text class="s" x="520" y="218">算强度：显式/推断</text>
+<text class="s" x="520" y="233">或不放行</text>
+<rect class="box" x="638" y="180" width="118" height="64" rx="8"/>
+<text class="n" x="650" y="201">Assessment</text>
+<text class="s" x="650" y="218">Router 模型判断</text>
+<text class="s" x="650" y="233">接单/挂靠/叫停</text>
+<text class="q" x="512" y="266">ignore 或 observe 模式：只记录决定</text>
+<rect class="acc" x="784" y="176" width="152" height="64" rx="8"/>
+<text class="n" x="796" y="197">Ticket + Mandate</text>
+<text class="s" x="796" y="214">原子建单</text>
+<text class="s" x="796" y="229">授权不可变·订阅 Thread</text>
+<path class="ln" d="M160 208H184" marker-end="url(#a)"/>
+<path class="ln" d="M320 208H344" marker-end="url(#a)"/>
+<path class="ln" d="M480 208H500" marker-end="url(#a)"/>
+<path class="ln" d="M626 212H638" marker-end="url(#a)"/>
+<path class="ln" d="M764 208H784" marker-end="url(#a)"/>
+<path class="ln" d="M412 176V108H860V176" marker-end="url(#a)"/>
+<text class="q" x="424" y="100">人的跟进：按订阅直接扇出给工单的 Worker，不进 Eval；超出范围的由 Worker 退回</text>
+<path class="ln" d="M860 240V320" marker-end="url(#a)"/>
+<text class="q" x="870" y="286">Assignment</text>
+<rect class="box" x="784" y="320" width="152" height="64" rx="8"/>
+<text class="n" x="796" y="341">Executor 插件</text>
+<text class="s" x="796" y="358">一个工单一个会话</text>
+<text class="s" x="796" y="373">一个工作目录</text>
+<rect class="box" x="584" y="320" width="168" height="64" rx="8"/>
+<text class="n" x="596" y="341">Report</text>
+<text class="s" x="596" y="358">progress·waiting·ready</text>
+<text class="s" x="596" y="373">blocked·failed·dropped</text>
+<rect class="box" x="344" y="320" width="200" height="64" rx="8"/>
+<text class="n" x="356" y="341">Outbox</text>
+<text class="s" x="356" y="358">先入队再发送</text>
+<text class="s" x="356" y="373">同工单同对话严格有序</text>
+<rect class="box" x="24" y="320" width="136" height="64" rx="8"/>
+<text class="n" x="36" y="341">Channel</text>
+<text class="s" x="36" y="358">回复原对话</text>
+<text class="s" x="36" y="373">Source 的写入端</text>
+<path class="ln" d="M784 352H752" marker-end="url(#a)"/>
+<path class="ln" d="M584 352H544" marker-end="url(#a)"/>
+<path class="ln" d="M344 352H160" marker-end="url(#a)"/>
+<path class="ln" d="M92 240V320" stroke-dasharray="4 3"/>
+<text class="q" x="100" y="284">同一插件</text>
+<text class="q" x="560" y="404">需要人拍板：Report 带一个 human_action 问题，Router 原样转到提问处</text>
+<text class="q" x="24" y="440">图中每个对外动作（启动 Worker、投递 Input、发消息）都先写进 Effects 队列，事务提交后才执行，失败退避重试，重启后接着做。</text>
+</svg>

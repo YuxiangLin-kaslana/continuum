@@ -1,0 +1,146 @@
+# Continuum 框架设计（草案）
+
+2026-11-02 · 草案，待讨论
+
+用 Python 复刻 [dsh-superagent](https://github.com/deepseek-ai/dsh-superagent) 的核心思想，并把它做成一个**内核很小、扩展点很多**的框架：内核只管"谁能让 agent 干活、干到什么程度、干的过程可靠可审计"，其余一切（事件从哪来、谁来干、用什么模型、结果发到哪）都是插件。
+
+## 1. 设计原则
+
+从 dsh-superagent 继承的六条：
+
+1. **概念少**：只有 Source、Trigger、Thread、Eval、Mandate、Ticket、Assignment、Subscription、Channel、Policy 这几个领域概念。新需求要么是某个概念的属性，要么是一段提示词，不新增概念。
+2. **内核纯净**：`continuum.core` 不做任何 I/O、不调模型、同步执行，只改领域状态。所以领域规则可以全内存测试。
+3. **单一写入者**：工单、Thread、决策只有 Engine 能写；插件只能通过收窄的接口请求 Engine，不能直接改状态。
+4. **先存再做**：所有副作用（启动 Worker、投递消息、对外回复）都在事务里入队，提交后才执行；失败重试，崩溃后接着做。
+5. **代码定权限，模型做判断**：谁能要活、强度多大由代码（Gate）算；模型只在这个范围内判断接不接、怎么做。外部文本永远只是数据。
+6. **尽量少占人的注意力**：有人要或有规则允许才动手，有结果或需要决策才开口。
+
+为"包容"新增的三条：
+
+7. **一切外部能力都是插件**，内置实现和第三方插件走同一套注册机制，没有"特权插件"。
+8. **插件自描述**：每个插件声明自己的配置结构（pydantic）、健康项、所需权限；框架据此做校验、生成面板表单、做授权。
+9. **契约有版本**：扩展点接口带 `api_version`，内核升级不悄悄破坏插件。
+
+## 2. 分层
+
+![分层与扩展点](images/framework-layers.svg)
+
+| 层 | 包 | 职责 | 依赖 |
+| --- | --- | --- | --- |
+| 领域内核 | `continuum.core` | 领域模型、Engine 及其五个部分、Policy 判定、端口协议（Protocol）、领域事件 | 只依赖标准库和 pydantic |
+| 运行时 | `continuum.runtime` | 组装（composition root）、Store、Effects 队列、Outbox、调度循环、插件注册表、设置与提示词版本、会话管理 | core |
+| 插件 | `continuum.plugins.*` 和第三方包 | 各扩展点的具体实现 | 只依赖 core 的协议和 runtime 给的 Context |
+| 接口 | `continuum.interfaces` | HTTP API（面板用）、CLI | runtime |
+
+依赖规则：`core` 不 import 任何其他层；插件之间不互相 import，只通过注册表协作。
+
+## 3. 一条事件的旅程
+
+![事件流](images/framework-flow.svg)
+
+1. **入库**：Source 插件把外部事件翻译成不可变的 `Trigger`，交给 `Engine.receive()`。同 id 重复到达直接返回 `duplicate`。
+2. **扇出**：查 Trigger 所属 Thread 上订阅的工单，作为 `Input` 投过去。人发的消息若已被某工单认领，就交给那个工单的 Worker 自己判断，不进 Eval。
+3. **Eval 第一层 Gate**：GateRule 插件链按顺序判定，得出强度 `explicit` / `inferred` / 不放行，以及依据（basis）。
+4. **Eval 第二层 Assessment**：Assessor 插件（默认是 LLM 的 Router 会话）在强度范围内判 `accept` / `attach` / `stop` / `ignore`。推断候选要按启用的规则逐条判断并给证据；`observe` 模式下只记录"本来会接"。
+5. **建单**：accept 在一个事务里建好 Ticket、Mandate、首个 Assignment、订阅，以及确认消息的发件记录。
+6. **执行**：Effects 队列启动 Executor 插件，Worker 在自己的会话和工作目录里干活，用结构化 `Report`（progress / waiting / ready / blocked / failed / dropped）汇报；需要人拍板时带一个 `human_action` 问题。
+7. **回复**：所有对外消息经 Outbox 入队，由对应 Source 的 Channel 发出，同一工单同一对话严格有序。
+
+## 4. 扩展点
+
+![插件机制](images/framework-plugins.svg)
+
+| 扩展点 | 协议 | 做什么 | 内置实现 | 以后的例子 |
+| --- | --- | --- | --- | --- |
+| Source | `SourceKind` | 产出 Trigger，划分 Thread；可选 Channel（写回）、上下文读取器、Policy 片段 | `cli`、`webhook`、`timer` | 飞书、邮件、GitHub、ERP、**OS Runtime**（屏幕事件） |
+| Gate 规则 | `GateRule` | 对 Trigger 给出强度和依据，或弃权；按顺序组成链 | 白名单、准入表、机器人名单 | 部门规则、工作时间规则 |
+| 主动规则 | `ProactiveRule` | 描述一类"没人点名也可以接"的活，给 Assessor 看 | 文本规则 | 报价异常规则、交期变更规则 |
+| Assessor | `Assessor` | Eval 第二层判断 | LLM Router 会话、`always_ignore`（测试用） | 规则引擎、小模型分类器 |
+| Executor | `ExecutorKind` | 运行一个 Assignment：准备工作区、开会话、投递 Input、回报 | `agent`（内置工具循环）、`script`（确定性 Python 函数） | Codex / Claude Code CLI、OManus、`human`（派给人） |
+| 工具 | `ToolProvider` | 给 Worker 提供工具 | Python 函数工具、MCP 客户端 | BOM 解析、寻源、ERP 查询 |
+| 模型 | `ModelProvider` | 统一的对话/工具调用接口 | OpenAI 兼容（覆盖 DeepSeek） | Anthropic、本地模型 |
+| Effect 处理器 | `EffectHandler` | 一类持久副作用的执行器 | launch、delivery、relay、reply | 写审计、推送通知 |
+| 事件订阅 | `EventSubscriber` | 订阅领域事件（`ticket.created` 等），只读，可再入队副作用 | 日志、指标 | 面板实时推送、Webhook 转发 |
+| 存储 | `Repositories` | 领域仓库 + KV | 内存、SQLite | PostgreSQL |
+| 预留 | `MemoryProvider`、`GoalStore` | Continuum 的记忆与长期目标 | — | Context Graph、Goal Engine |
+
+### 插件长什么样
+
+```python
+# my_plugin/__init__.py
+from continuum.plugin import Plugin, PluginContext
+from pydantic import BaseModel
+
+class EmailConfig(BaseModel):
+    imap_host: str
+    mailbox: str = "INBOX"
+
+class EmailSource:                      # 实现 SourceKind 协议
+    kind = "email"
+    config_schema = EmailConfig
+    async def run(self, ctx, config):   # ctx 是收窄的 SourceContext
+        async for msg in poll(config):
+            ctx.receive(to_trigger(msg))   # 只能"请求"Engine，不能直接写状态
+
+plugin = Plugin(
+    name="email",
+    api_version="1",
+    provides={"sources": [EmailSource()]},
+    requires_permissions=["network"],
+)
+```
+
+```toml
+# 第三方包的 pyproject.toml，用标准 entry points 被发现
+[project.entry-points."continuum.plugins"]
+email = "my_plugin:plugin"
+```
+
+框架启动时：
+
+1. 从 entry points 和本地 `plugins/` 目录发现插件，检查 `api_version`。
+2. 把插件提供的实现登记到注册表的对应扩展点；同名冲突拒绝启动。
+3. 每个插件只拿到对应角色的 Context（`SourceContext`、`ExecutorContext`……），里面是 Engine 的一个"角色视图"，加上它自己命名空间下的 KV 状态和健康项。
+4. 配置用插件声明的 pydantic 模型校验；校验失败只停用这个插件实例，不影响别的。
+
+## 5. 内核模型（复刻 dsh-superagent）
+
+| 概念 | Python 类型 | 关键规则 |
+| --- | --- | --- |
+| Trigger | `Trigger(id, source, threads, actor, human, addressed, at, text, meta)`，frozen | 不可变；按 id 幂等 |
+| Thread | `Thread(key, subscriptions, context_subs, running_eval, queued, correlated)` | 同一时间最多一个 Eval；期间到达的合并进下一批 |
+| Eval / Decision | `Evaluation`、`Decision(outcome, reasons, strength)` | 无状态判决；过期重排两次，第三次记 `unavailable` |
+| Mandate | `Mandate(policy_version, scope, strength, basis, rules, sender)`，frozen | 不可变；恢复前用当前 Policy 重新校验 |
+| Ticket | `Ticket(id, mandate, channels, inputs, follows, ended)` | 只有 accept 能创建；人叫停后不再接收任何东西 |
+| Assignment | `Assignment(id, executor, state, reports)` | pending → running → ended，与工单状态独立 |
+| Report | `Report(state, summary, human_action, evidence)` | 六种状态；问题只走结构化字段 |
+
+Engine 按职责拆成五部分，单向依赖：`Intake → Evals → Tickets → Assignments → Replies`。调用方拿到的是角色视图：`EngineForSources`、`EngineForRouter`、`EngineForExecutor`、`EngineForPeople`、`EngineForSettings`。
+
+## 6. 技术选型
+
+| 用途 | 选择 | 理由 |
+| --- | --- | --- |
+| 语言 | Python 3.12 | 团队栈；`typing.Protocol` 适合端口与适配器 |
+| 领域模型与配置 | pydantic v2 | 校验、序列化、自动生成表单所需的 JSON Schema |
+| 并发 | asyncio，单进程 | 内核同步、运行时异步；和 dsh 一样一个调度循环 |
+| 存储 | SQLite（WAL）起步，仓库协议可换 PostgreSQL | 单写入者模型下 SQLite 足够 |
+| 插件发现 | `importlib.metadata` entry points | 标准机制，不引入额外框架 |
+| HTTP / CLI | FastAPI / Typer | 面板 API 和运维命令 |
+| 测试 | pytest | 内核用内存仓库做纯领域测试 |
+
+## 7. 复刻路线
+
+| 阶段 | 内容 | 验收 |
+| --- | --- | --- |
+| F0 内核 | 领域模型、Engine 五部分、Policy 与 Gate 链、内存仓库 | 用纯内存测试覆盖：幂等、串行 Eval、扇出、跟进归属、handback、Mandate 重校验、observe 模式 |
+| F1 运行时 | SQLite、Effects、Outbox、调度循环、插件注册表、`cli` Source、`script` Executor | 命令行发一条请求，脚本 Worker 完成并回复；中途杀进程重启后能接着做 |
+| F2 智能 | `ModelProvider`、LLM Assessor（Router 会话）、`agent` Executor、提示词版本 | 一条自然语言请求被正确接单、执行、汇报；推断候选在 observe 模式只记录 |
+| F3 接入 | `webhook`、`timer`、一个真实 IM 或邮件 Source；HTTP API 和最小面板 | 面板只显示等人处理的工单 |
+| F4 Continuum | OS Runtime Source、`MemoryProvider`、`GoalStore` | 进入大纲里的 MVP |
+
+## 8. 待定
+
+- 是否把 OManus 包成一个 Executor 插件，复用它的沙箱和多租户？
+- 单进程是否够用，还是一开始就把 Executor 放到独立进程/机器？
+- 插件的权限声明（`requires_permissions`）由谁审批、怎么落地到沙箱？
