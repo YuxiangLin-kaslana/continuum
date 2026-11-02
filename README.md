@@ -19,6 +19,19 @@
 - [项目大纲](docs/outline.md)：定位、要解决的问题、切入场景、目标、相似项目、架构、模块设计、技术选型、路线图、风险。
 - [框架设计（草案）](docs/framework.md)：用 Python 复刻 dsh-superagent 的核心思想，内核小、扩展点多。
 
+## 开发
+
+```bash
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -e ".[dev]"
+.venv/bin/python -m pytest -q
+.venv/bin/ruff check src tests
+```
+
 ## 状态
 
-规划阶段（2026-11）。首个切入场景拟为制造业 BOM 报价与采购跟进。
+- F0 内核已完成：领域模型、Engine 五部分、Gate 规则链与标准 Gate、研判校验、策略变更影响、内存仓库，50 个测试。
+- 下一步 F1：SQLite、Effects 队列、Outbox、调度循环、插件注册表。
+- 首个切入场景拟为制造业 BOM 报价与采购跟进。
+
+`core` 和 `policy` 移植自 dsh-superagent（MIT），见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

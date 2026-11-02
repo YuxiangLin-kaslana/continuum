@@ -139,8 +139,19 @@ Engine 按职责拆成五部分，单向依赖：`Intake → Evals → Tickets �
 | F3 接入 | `webhook`、`timer`、一个真实 IM 或邮件 Source；HTTP API 和最小面板 | 面板只显示等人处理的工单 |
 | F4 Continuum | OS Runtime Source、`MemoryProvider`、`GoalStore` | 进入大纲里的 MVP |
 
-## 8. 待定
+## 8. 进度
 
-- 是否把 OManus 包成一个 Executor 插件，复用它的沙箱和多租户？
+**F0 已完成（2026-11-02）**：`src/continuum/core` 和 `src/continuum/policy`，50 个纯内存测试（`tests/`）。不基于 OManus，直接按 dsh-superagent 的内核用 Python 重写（2026-11-02 定）。
+
+与 dsh-superagent 有意不同的地方：
+
+- 去掉了它为兼容旧数据保留的分支（旧版 basis、旧版已读标记、旧队列清理等）。
+- Gate 改成规则链：`RulePolicy` 依次问每条 `GateRule`，第一个不弃权的说了算；Mandate 记下是哪条规则放行的，以后由同一条规则重校验。`StandardGate` 是 dsh 原来的判定逻辑。
+- 从没投递给 Worker 的消息，结束工单时一律算"未读"（原版在某些情况下算已读）。
+- `WorkerReport` 用 `clear_question=True` 清除问题，代替原版的 `question: null`。
+- 关闭结果、工单结局用字符串，不限定 GitHub 的 merged / closed，方便别的 Source 定义自己的结局。
+
+## 9. 待定
+
 - 单进程是否够用，还是一开始就把 Executor 放到独立进程/机器？
 - 插件的权限声明（`requires_permissions`）由谁审批、怎么落地到沙箱？
