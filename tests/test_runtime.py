@@ -136,7 +136,7 @@ def test_a_worker_that_raises_is_reported_failed_and_waits_for_a_person(tmp_path
 
 def test_configuration_problems_are_named(tmp_path):
     with pytest.raises(ConfigurationError, match="router kind"):
-        runtime(tmp_path, router={"kind": "model"})
+        runtime(tmp_path, router={"kind": "oracle"})
     rt = runtime(tmp_path, sources={"cli": {"kind": "cli", "config": {"poll_seconds": -1}},
                                      "mail": {"kind": "imap"}})
     try:

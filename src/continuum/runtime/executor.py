@@ -190,12 +190,13 @@ def _render(ticket: Ticket, store: SQLiteStore, input_id: str) -> InputView | No
 class InProcessExecutor:
     def __init__(self, store: SQLiteStore, effects: Effects, home: Path, kind: ExecutorKind, config: Any,
                  scripts: dict[str, Script], max_workers: int, relay: Callable[[Relay], None],
-                 paused: Callable[[], bool] = lambda: False, on_report: Callable[[str], None] | None = None):
+                 paused: Callable[[], bool] = lambda: False, on_report: Callable[[str], None] | None = None,
+                 models: Any = None):
         self.store = store
         self.effects = effects
         self.home = home
         self.kind = kind
-        self.context = ExecutorContext(config=config, scripts=scripts)
+        self.context = ExecutorContext(config=config, scripts=scripts, models=models or {})
         self.max_workers = max_workers
         self.relay = relay
         self.paused = paused
@@ -204,8 +205,8 @@ class InProcessExecutor:
         # Every running turn, including one whose session was stopped and is still finishing: each holds a slot.
         self.turns: set[asyncio.Task] = set()
         self._engine: Engine | None = None
-        effects.handle("launch", self._launch, base=5.0, cap=300.0)
-        effects.handle("delivery", self._deliver, base=2.0, cap=60.0)
+        effects.handle("launch", self._launch, base=5.0, cap=300.0, concurrency=2)
+        effects.handle("delivery", self._deliver, base=2.0, cap=60.0, concurrency=4)
 
     @property
     def engine(self) -> Engine:

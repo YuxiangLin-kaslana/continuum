@@ -21,6 +21,7 @@ from continuum.policy.gate import GateRule
 
 if TYPE_CHECKING:
     from continuum.core.engine import EngineForRouter
+    from continuum.models import ChatModel
     from continuum.runtime.executor import Job
 
 API_VERSION = "1"
@@ -77,6 +78,10 @@ class Relay(BaseModel):
 class RouterContext:
     engine: EngineForRouter
     config: Any
+    # The chat models the settings name, by name.
+    models: Mapping[str, ChatModel] = field(default_factory=dict)
+    # The Policy's configuration, for rules and accept mode.
+    policy: Any = None
 
 
 class RouterKind(Protocol):
@@ -101,6 +106,7 @@ Script = Callable[["Job"], Awaitable[None] | None]
 class ExecutorContext:
     config: Any
     scripts: Mapping[str, Script]
+    models: Mapping[str, ChatModel] = field(default_factory=dict)
 
 
 class ExecutorKind(Protocol):

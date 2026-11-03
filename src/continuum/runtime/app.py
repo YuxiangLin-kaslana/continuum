@@ -17,6 +17,7 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from continuum.core.engine import Engine
+from continuum.models import ChatModel
 from continuum.core.model import Trigger
 from continuum.core.part import EngineOptions
 from continuum.core.ports import DomainEvent, OutboundMessage, ScopeResult
@@ -64,7 +65,7 @@ class SourceInstanceContext:
 
 class Runtime:
     def __init__(self, home: Path, settings: Settings | None = None, *, plugins: Iterable[Plugin] | None = None,
-                 entry_points: bool = True):
+                 entry_points: bool = True, models: dict[str, Any] | None = None):
         from continuum.plugins import BUILTINS
 
         self.home = home.resolve()
@@ -81,16 +82,20 @@ class Runtime:
             self.effects = Effects(self.store, on_enqueue=self.poke)
             self.sources = self._sources()
             gate_rules = self._gate_rules()
+            # `models` replaces the configured ones, such as with scripted models in tests.
+            self.models = models if models is not None else {
+                name: ChatModel(name, spec) for name, spec in self.settings.models.items()}
             self.policy = RulePolicy(self.settings.policy, self, gate_rules)
             router_kind = self._kind(self.registry.routers, self.settings.router.kind, "router")
             executor_kind = self._kind(self.registry.executors, self.settings.executor.kind, "executor")
             self.router = RouterAssessor(self.store, self.effects, router_kind,
-                                         self._config(router_kind, self.settings.router.config, "router"))
+                                         self._config(router_kind, self.settings.router.config, "router"),
+                                         self.models, lambda: self.settings.policy)
             self.executor = InProcessExecutor(
                 self.store, self.effects, self.home, executor_kind,
                 self._config(executor_kind, self.settings.executor.config, "executor"), self.registry.scripts,
                 self.settings.executor.max_workers, self.router.relay, paused=lambda: self.policy.paused,
-                on_report=self.notify_ticket)
+                on_report=self.notify_ticket, models=self.models)
             self.outbox = StoreOutbox(self.store, self.effects, self._send)
             self.engine = Engine(EngineOptions(
                 repo=self.store, policy=lambda: self.policy, scope=self, assessor=self.router,
@@ -261,7 +266,7 @@ class Runtime:
         except Exception as error:  # noqa: BLE001 - a plugin that raises, such as a gate rule, must not stop the host
             log.exception("evaluating failed")
             self._problem(f"evaluate: {type(error).__name__}: {error}")
-        await self.effects.run_due()
+        await self.effects.run_due(wait=False)
 
     async def serve_api(self) -> int:
         """Start the HTTP API on the configured address; returns the port it listens on."""
@@ -324,6 +329,9 @@ class Runtime:
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
+        await self.effects.shutdown()
+        for model in self.models.values():
+            await model.close()
         await self.executor.shutdown()
         self.store.close()
         self._release_lock()

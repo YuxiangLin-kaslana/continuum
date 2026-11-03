@@ -22,13 +22,16 @@ log = logging.getLogger("continuum.router")
 
 
 class RouterAssessor:
-    def __init__(self, store: SQLiteStore, effects: Effects, kind: RouterKind, config: Any):
+    def __init__(self, store: SQLiteStore, effects: Effects, kind: RouterKind, config: Any,
+                 models: Any = None, policy: Any = None):
         self.store = store
         self.effects = effects
         self.kind = kind
         self.config = config
+        self.models = models or {}
+        self.policy = policy
         self._engine: Engine | None = None
-        effects.handle("assessment", self._assess, base=2.0, cap=60.0)
+        effects.handle("assessment", self._assess, base=2.0, cap=60.0, concurrency=4)
         effects.handle("relay", self._relay, base=2.0, cap=60.0)
 
     def bind(self, engine: Engine) -> None:
@@ -37,7 +40,8 @@ class RouterAssessor:
     @property
     def context(self) -> RouterContext:
         assert self._engine is not None
-        return RouterContext(engine=self._engine, config=self.config)
+        return RouterContext(engine=self._engine, config=self.config, models=self.models,
+                             policy=self.policy() if callable(self.policy) else self.policy)
 
     # --- the port ---
 

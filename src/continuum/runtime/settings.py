@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from continuum.models import ModelSettings
 from continuum.policy.config import PolicyConfig
 
 
@@ -48,6 +49,8 @@ class Settings(_Strict):
     executor: ExecutorSettings = ExecutorSettings()
     sources: dict[str, SourceInstance] = {"cli": SourceInstance(kind="cli")}
     api: ApiSettings = ApiSettings()
+    # Chat models by name, for the router and the agent executor.
+    models: dict[str, ModelSettings] = {}
     # Seconds between passes when nothing pokes the scheduler.
     tick_seconds: float = Field(default=1.0, gt=0, le=60)
 
@@ -70,15 +73,23 @@ allowed = [{ id = "me" }]
 [policy.sources.app]
 allowed = [{ id = "me" }]
 
+# rules: accept explicit requests without a model. model: a chat model decides (needs [models.default]).
 [router]
 kind = "rules"
 
+# script: a named Python function does the work. agent: a chat model with a shell in a sandbox.
 [executor]
 kind = "script"
 max_workers = 3
 
 [executor.config]
 script = "echo"
+
+# An OpenAI-compatible chat model. The key comes from the environment variable, never from this file.
+[models.default]
+base_url = "https://api.deepseek.com"
+model = "deepseek-flash"
+api_key_env = "DEEPSEEK_API_KEY"
 
 [sources.cli]
 kind = "cli"
