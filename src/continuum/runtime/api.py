@@ -137,7 +137,9 @@ def create_app(rt: Runtime) -> FastAPI:
     async def stream(socket: WebSocket, token: str | None = None) -> None:
         user = rt.accounts.verify(token)
         if user is None:
-            await socket.close(code=4401)
+            # Accepted first, so the client sees why: 4401, the WebSocket form of 401.
+            await socket.accept()
+            await socket.close(code=4401, reason="a valid token is required")
             return
         kind, _ = source()
         await socket.accept()

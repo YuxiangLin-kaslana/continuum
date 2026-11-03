@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["desktop-v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install Python packages
+        run: |
+          python -m pip install -e ".[dev]" "playwright==1.64.0"
+          python -m playwright install --with-deps chromium
+      - name: Install desktop packages
+        working-directory: desktop
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: npm ci
+      - name: Lint
+        run: ruff check src tests
+      - name: Test
+        run: python -m pytest -q
+
+  desktop:
+    name: Desktop (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Smoke test - the app starts and its window loads
+        run: npx electron . --smoke
+      - name: Build the installer
+        run: npm run dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: continuum-desktop-windows
+          path: desktop/dist/*.exe
+          if-no-files-found: error
