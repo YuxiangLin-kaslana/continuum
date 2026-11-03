@@ -1,0 +1,128 @@
+"""The HTTP and WebSocket API the desktop app uses, against a real server on a free port."""
+
+import asyncio
+import json
+
+import httpx
+import websockets
+
+from continuum.plugin import Plugin
+
+from test_runtime import runtime
+
+
+async def serve(rt):
+    rt.start()
+    port = await rt.serve_api()
+    runner = asyncio.create_task(_passes(rt))
+    return port, runner
+
+
+async def _passes(rt):
+    while True:
+        await rt.pass_once()
+        await asyncio.sleep(0.01)
+
+
+def app_runtime(tmp_path, script="echo", extra=(), allowed=("me",)):
+    policy = {"sources": {"app": {"allowed": [{"id": u} for u in allowed]}}}
+    return runtime(tmp_path, script, extra, policy=policy, api={"enabled": True, "port": 0},
+                   sources={"app": {"kind": "app"}})
+
+
+async def until(predicate, timeout=5.0):
+    end = asyncio.get_running_loop().time() + timeout
+    while not predicate():
+        assert asyncio.get_running_loop().time() < end, "timed out"
+        await asyncio.sleep(0.02)
+
+
+def test_a_desktop_conversation_end_to_end(tmp_path):
+    async def main():
+        rt = app_runtime(tmp_path)
+        token = rt.accounts.add("me", "laptop")
+        port, runner = await serve(rt)
+        base = f"http://127.0.0.1:{port}"
+        auth = {"Authorization": f"Bearer {token}"}
+        events = []
+        try:
+            async with httpx.AsyncClient(base_url=base) as client:
+                assert (await client.get("/api/health")).json() == {"ok": True}
+                assert (await client.get("/api/v1/me")).status_code == 401
+                assert (await client.get("/api/v1/me", headers=auth)).json()["user"] == "me"
+                async with websockets.connect(f"ws://127.0.0.1:{port}/api/v1/stream?token={token}") as ws:
+                    assert json.loads(await ws.recv())["type"] == "hello"
+
+                    async def listen():
+                        async for raw in ws:
+                            events.append(json.loads(raw))
+
+                    listener = asyncio.create_task(listen())
+                    posted = await client.post("/api/v1/threads/bom/messages", headers=auth,
+                                               json={"text": "检查 BOM 报价"})
+                    assert posted.status_code == 201 and posted.json()["role"] == "user"
+                    await until(lambda: any(e.get("message", {}).get("role") == "reply" for e in events))
+                    listener.cancel()
+                roles = [e["message"]["role"] for e in events if e["type"] == "message"]
+                assert roles == ["user", "acknowledgement", "reply"]
+                assert any(e["type"] == "ticket" and e["ticket"]["outcome"] == "completed" for e in events)
+                history = (await client.get("/api/v1/threads/bom/messages", headers=auth)).json()
+                assert [m["role"] for m in history] == ["user", "acknowledgement", "reply"]
+                assert (await client.get("/api/v1/threads", headers=auth)).json()[0]["thread"] == "bom"
+                [ticket] = (await client.get("/api/v1/tickets", headers=auth)).json()
+                assert ticket["thread"] == "bom" and ticket["outcome"] == "completed"
+        finally:
+            runner.cancel()
+            await rt.close()
+
+    asyncio.run(main())
+
+
+def test_users_see_only_their_own_conversations_and_tickets_and_can_stop_them(tmp_path):
+    async def hold(job):
+        await asyncio.sleep(3600)
+
+    async def main():
+        rt = app_runtime(tmp_path, "hold", [Plugin(name="hold", scripts={"hold": hold})], allowed=("ann", "bob"))
+        ann = {"Authorization": f"Bearer {rt.accounts.add('ann')}"}
+        bob = {"Authorization": f"Bearer {rt.accounts.add('bob')}"}
+        port, runner = await serve(rt)
+        try:
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client:
+                await client.post("/api/v1/threads/main/messages", headers=ann, json={"text": "a long job"})
+                await until(lambda: bool(rt.executor.sessions))
+                [ticket] = (await client.get("/api/v1/tickets?open=true", headers=ann)).json()
+                assert ticket["stage"] == "working"
+                assert (await client.get("/api/v1/tickets", headers=bob)).json() == []
+                assert (await client.get("/api/v1/threads/main/messages", headers=bob)).json() == []
+                assert (await client.get(f"/api/v1/tickets/{ticket['id']}", headers=bob)).status_code == 404
+                assert (await client.post(f"/api/v1/tickets/{ticket['id']}/stop", headers=bob)).status_code == 404
+                stopped = await client.post(f"/api/v1/tickets/{ticket['id']}/stop", headers=ann,
+                                            json={"reason": "not needed"})
+                assert stopped.json()["outcome"] == "stopped"
+                await until(lambda: rt.executor.sessions == {})
+                assert (await client.post("/api/v1/threads/bad name/messages", headers=ann,
+                                           json={"text": "x"})).status_code == 422
+        finally:
+            runner.cancel()
+            await rt.close()
+
+    asyncio.run(main())
+
+
+def test_a_revoked_token_no_longer_works(tmp_path):
+    async def main():
+        rt = app_runtime(tmp_path)
+        token = rt.accounts.add("me")
+        port, runner = await serve(rt)
+        try:
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client:
+                auth = {"Authorization": f"Bearer {token}"}
+                assert (await client.get("/api/v1/me", headers=auth)).status_code == 200
+                rt.accounts.revoke("me")
+                assert (await client.get("/api/v1/me", headers=auth)).status_code == 401
+        finally:
+            runner.cancel()
+            await rt.close()
+
+    asyncio.run(main())

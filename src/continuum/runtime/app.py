@@ -25,6 +25,7 @@ from continuum.policy.config import PolicyConfig
 from continuum.policy.effects import policy_effects
 from continuum.policy.gate import RulePolicy
 
+from .accounts import Accounts
 from .effects import Effects
 from .executor import InProcessExecutor
 from .outbox import StoreOutbox
@@ -75,6 +76,7 @@ class Runtime:
             self.registry.load(BUILTINS if plugins is None else plugins, entry_points, self.home / "plugins")
             self.problems: list[str] = list(self.registry.problems)
             self.store = SQLiteStore(self.home / "continuum.db")
+            self.accounts = Accounts(self.store)
             self._wake = asyncio.Event()
             self.effects = Effects(self.store, on_enqueue=self.poke)
             self.sources = self._sources()
@@ -87,7 +89,8 @@ class Runtime:
             self.executor = InProcessExecutor(
                 self.store, self.effects, self.home, executor_kind,
                 self._config(executor_kind, self.settings.executor.config, "executor"), self.registry.scripts,
-                self.settings.executor.max_workers, self.router.relay, paused=lambda: self.policy.paused)
+                self.settings.executor.max_workers, self.router.relay, paused=lambda: self.policy.paused,
+                on_report=self.notify_ticket)
             self.outbox = StoreOutbox(self.store, self.effects, self._send)
             self.engine = Engine(EngineOptions(
                 repo=self.store, policy=lambda: self.policy, scope=self, assessor=self.router,
@@ -99,6 +102,8 @@ class Runtime:
             raise
         self._tasks: list[asyncio.Task] = []
         self._started = False
+        self._server: Any = None
+        self._server_task: asyncio.Task | None = None
 
     # --- construction helpers ---
 
@@ -178,6 +183,23 @@ class Runtime:
     def _emit(self, event: DomainEvent) -> None:
         if event.type in ("ticket.created", "ticket.ended", "ticket.resumed", "decision.recorded"):
             log.info("%s %s", event.type, {k: v for k, v in event.data.items() if v is not None})
+        if event.type.startswith("ticket."):
+            ticket_id = event.data["ticket_id"]
+            self.store.after_commit(lambda: self.notify_ticket(ticket_id))
+
+    def notify_ticket(self, ticket_id: str) -> None:
+        """Tell the API streams of the people a ticket belongs to that it changed."""
+        ticket = self.store.tickets.get(ticket_id)
+        if ticket is None:
+            return
+        for ctx in self.sources.values():
+            if ctx.kind.kind != "app":
+                continue
+            users = {c.address["user"] for c in ticket.channels if c.source == ctx.instance and "user" in c.address}
+            if ticket.mandate.actor.source == ctx.instance:
+                users.add(ticket.mandate.actor.id)
+            for user in users:
+                ctx.kind.publish(user, {"type": "ticket", "id": ticket_id})
 
     # --- running ---
 
@@ -241,8 +263,34 @@ class Runtime:
             self._problem(f"evaluate: {type(error).__name__}: {error}")
         await self.effects.run_due()
 
+    async def serve_api(self) -> int:
+        """Start the HTTP API on the configured address; returns the port it listens on."""
+        import uvicorn
+
+        from .api import create_app
+
+        class Server(uvicorn.Server):
+            def capture_signals(self):  # the host handles signals itself
+                import contextlib
+                return contextlib.nullcontext()
+
+        config = uvicorn.Config(create_app(self), host=self.settings.api.host, port=self.settings.api.port,
+                                log_level="warning", lifespan="off", ws_ping_interval=None)
+        self._server = Server(config)
+        self._server_task = asyncio.create_task(self._server.serve(), name="api")
+        while not self._server.started:
+            if self._server_task.done():
+                self._server_task.result()
+                raise RuntimeError("the API server stopped while starting")
+            await asyncio.sleep(0.01)
+        port = self._server.servers[0].sockets[0].getsockname()[1]
+        log.info("API listening on %s:%d", self.settings.api.host, port)
+        return port
+
     async def run(self, stop: asyncio.Event | None = None) -> None:
         self.start()
+        if self.settings.api.enabled and self._server is None:
+            await self.serve_api()
         stop = stop or asyncio.Event()
         watcher = asyncio.create_task(stop.wait())
         watcher.add_done_callback(lambda _: self.poke())
@@ -262,6 +310,17 @@ class Runtime:
             watcher.cancel()
 
     async def close(self) -> None:
+        if self._server is not None and self._server_task is not None:
+            for ctx in self.sources.values():
+                closer = getattr(ctx.kind, "close_streams", None)
+                if closer:
+                    closer()
+            self._server.should_exit = True
+            await asyncio.gather(self._server_task, return_exceptions=True)
+        for ctx in self.sources.values():
+            closer = getattr(ctx.kind, "close", None)
+            if closer:
+                closer()
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)

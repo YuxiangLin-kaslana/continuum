@@ -112,6 +112,34 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_user(args: argparse.Namespace) -> int:
+    from .accounts import Accounts
+    from .store import SQLiteStore
+
+    home = _home(args.home)
+    if not settings_path(home).exists():
+        init_home(home)
+    store = SQLiteStore(home / "continuum.db")
+    try:
+        accounts = Accounts(store)
+        if args.action == "add":
+            token = accounts.add(args.name, args.device or "")
+            print(f"Token for {args.name}{' (' + args.device + ')' if args.device else ''}, shown once:")
+            print(token)
+            print(f"To let {args.name} ask for work, list them under [policy.sources.app].allowed in "
+                  f"{settings_path(home)}.")
+        elif args.action == "list":
+            for row in accounts.list():
+                state = "revoked" if row["revoked"] else "active"
+                print(f"{row['user']:<20} {row['device'] or '-':<16} {state:<8} {row['created_at'][:19]}")
+        else:
+            count = accounts.revoke(args.name, args.device)
+            print(f"revoked {count} token(s) of {args.name}")
+    finally:
+        store.close()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="continuum")
     parser.add_argument("--home", help="the home directory (default: ./.continuum)")
@@ -130,10 +158,17 @@ def main(argv: list[str] | None = None) -> int:
     log.add_argument("--thread")
     log.add_argument("--source", default="cli")
     log.set_defaults(run=cmd_log)
+    user = sub.add_parser("user", help="manage API users and their tokens")
+    user.add_argument("action", choices=["add", "list", "revoke"])
+    user.add_argument("name", nargs="?")
+    user.add_argument("--device", help="a label for the device the token is for")
+    user.set_defaults(run=cmd_user)
     status = sub.add_parser("status", help="print tickets and problems")
     status.add_argument("--limit", type=int, default=10)
     status.set_defaults(run=cmd_status)
     args = parser.parse_args(argv)
+    if getattr(args, "action", None) in ("add", "revoke") and not args.name:
+        parser.error(f"user {args.action} needs a name")
     with contextlib.suppress(KeyboardInterrupt):
         return args.run(args)
     return 130

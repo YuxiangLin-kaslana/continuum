@@ -33,6 +33,13 @@ class ExecutorSettings(_Strict):
     config: dict[str, Any] = {}
 
 
+class ApiSettings(_Strict):
+    enabled: bool = False
+    # Keep it on loopback and put a TLS proxy (such as Caddy) in front of it for remote clients.
+    host: str = "127.0.0.1"
+    port: int = Field(default=8170, ge=0, le=65535)
+
+
 class Settings(_Strict):
     policy: PolicyConfig = PolicyConfig()
     # The gate rules, in the order they are asked; `standard` is dsh-superagent's gate.
@@ -40,6 +47,7 @@ class Settings(_Strict):
     router: RouterSettings = RouterSettings()
     executor: ExecutorSettings = ExecutorSettings()
     sources: dict[str, SourceInstance] = {"cli": SourceInstance(kind="cli")}
+    api: ApiSettings = ApiSettings()
     # Seconds between passes when nothing pokes the scheduler.
     tick_seconds: float = Field(default=1.0, gt=0, le=60)
 
@@ -54,8 +62,12 @@ gate = ["standard"]
 mode = "observe"
 eval_timeout_seconds = 120
 
-# Who may ask for work through the command-line Source, in that Source's own identities.
+# Who may ask for work, per Source, in that Source's own identities.
 [policy.sources.cli]
+allowed = [{ id = "me" }]
+
+# Users of the desktop app and other API clients; `continuum user add <name>` gives each a token.
+[policy.sources.app]
 allowed = [{ id = "me" }]
 
 [router]
@@ -70,6 +82,15 @@ script = "echo"
 
 [sources.cli]
 kind = "cli"
+
+[sources.app]
+kind = "app"
+
+# The API the desktop app connects to. On a server, keep it on loopback behind an HTTPS proxy.
+[api]
+enabled = true
+host = "127.0.0.1"
+port = 8170
 """
 
 

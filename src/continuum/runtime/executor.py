@@ -190,7 +190,7 @@ def _render(ticket: Ticket, store: SQLiteStore, input_id: str) -> InputView | No
 class InProcessExecutor:
     def __init__(self, store: SQLiteStore, effects: Effects, home: Path, kind: ExecutorKind, config: Any,
                  scripts: dict[str, Script], max_workers: int, relay: Callable[[Relay], None],
-                 paused: Callable[[], bool] = lambda: False):
+                 paused: Callable[[], bool] = lambda: False, on_report: Callable[[str], None] | None = None):
         self.store = store
         self.effects = effects
         self.home = home
@@ -199,6 +199,7 @@ class InProcessExecutor:
         self.max_workers = max_workers
         self.relay = relay
         self.paused = paused
+        self.on_report = on_report
         self.sessions: dict[str, Session] = {}
         # Every running turn, including one whose session was stopped and is still finishing: each holds a slot.
         self.turns: set[asyncio.Task] = set()
@@ -252,6 +253,9 @@ class InProcessExecutor:
                 relay = Relay(ticket_id=ticket_id, state=report.state, summary=report.summary,
                               question=report.question)
                 self.relay(relay)
+            if self.on_report:
+                on_report = self.on_report
+                self.store.after_commit(lambda: on_report(ticket_id))
         self.store.atomic(work)
 
     # --- effect handlers ---

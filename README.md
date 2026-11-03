@@ -33,6 +33,7 @@ uv pip install --python .venv/bin/python -e ".[dev]"
 .venv/bin/continuum log                  # 看所有回复
 ```
 
+- 桌面端和其他客户端走 API（默认 `127.0.0.1:8170`）：`continuum user add <名字> --device <设备>` 发一个令牌（只显示一次），再把这个名字写进 `[policy.sources.app].allowed`。接口文档在运行时的 `/api/docs`。放到服务器上时，API 只监听本机，前面用 Caddy 之类的反向代理加 HTTPS。
 - 谁能派活写在 `.continuum/continuum.toml` 的 `[policy.sources.cli].allowed`，默认是 `me`（`send --as` 的默认值）。
 - 换 Worker：在 `.continuum/plugins/` 放一个定义了 `plugin = Plugin(name=..., scripts={...})` 的 `.py` 文件，再把 `[executor.config].script` 改成脚本名，不用改任何核心代码。
 - 进程随时可以被杀掉；重启后，干到一半的工单会带着恢复说明重新开始，已经发出的消息不会再发。
@@ -48,6 +49,7 @@ uv pip install --python .venv/bin/python -e ".[dev]"
 
 - F0 内核已完成：领域模型、Engine 五部分、Gate 规则链与标准 Gate、研判校验、策略变更影响。
 - F1 运行时已完成：SQLite 存储、Effects 队列、Outbox、调度循环、插件注册表、进程内执行器、命令行 Source、规则版 Router、脚本 Worker、`continuum` 命令。
-- 下一步 F2：接入模型，做 Router 会话和 agent Worker。
+- F2a 远程 API 已完成：令牌登录、桌面对话 Source、HTTP 接口（对话、工单、叫停、重试）、WebSocket 实时推送。
+- 下一步 F2b：Windows 桌面端（Electron）；F2c：接入模型做 Router 和 agent Worker（带沙箱）。
 
 `core` 和 `policy` 移植自 dsh-superagent（MIT），见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
