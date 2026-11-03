@@ -13,11 +13,14 @@ from .gate import GateRule, RulePolicy
 
 def policy_effects(tickets: Sequence[Ticket], old: PolicyConfig, new: PolicyConfig,
                    scope: Callable[[PolicyConfig], SourceScope],
-                   gate_rules: Callable[[], Sequence[GateRule]] | None = None) -> dict[str, PolicyEffect]:
-    def policy(config: PolicyConfig) -> RulePolicy:
-        return RulePolicy(config, scope(config), gate_rules() if gate_rules else None)
+                   gate_rules: Callable[[], Sequence[GateRule]] | None = None,
+                   old_gate_rules: Callable[[], Sequence[GateRule]] | None = None) -> dict[str, PolicyEffect]:
+    """`old_gate_rules` are the gate rules the old Policy ran, when they differ from the new ones."""
+    def policy(config: PolicyConfig, rules: Callable[[], Sequence[GateRule]] | None = None) -> RulePolicy:
+        rules = rules or gate_rules
+        return RulePolicy(config, scope(config), rules() if rules else None)
 
-    before, after = policy(old), policy(new)
+    before, after = policy(old, old_gate_rules), policy(new)
     effects: dict[str, PolicyEffect] = {}
     for ticket in tickets:
         rules: list[RuleEffect] = []

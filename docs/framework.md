@@ -151,6 +151,17 @@ Engine 按职责拆成五部分，单向依赖：`Intake → Evals → Tickets �
 - `WorkerReport` 用 `clear_question=True` 清除问题，代替原版的 `question: null`。
 - 关闭结果、工单结局用字符串，不限定 GitHub 的 merged / closed，方便别的 Source 定义自己的结局。
 
+**F1 已完成（2026-11-03）**：`src/continuum/runtime`、内置插件 `src/continuum/plugins`、`continuum` 命令。共 105 个测试，其中内核测试同时跑在内存仓库和 SQLite 上。手动验证过：用 `kill -9` 杀掉正在干活的进程，重启后工单带着恢复说明继续，已发出的消息不会再发。
+
+F1 的取舍和已知限制（F2/F3 再处理）：
+
+- Worker 和主程序在同一进程（方案 A）。执行器接口按"Worker 可能在别处"设计，以后换独立进程不用改内核。
+- Effects 队列一次只跑一个任务。F1 的任务都很快，没有问题；F2 的 Router 要调模型，到时需要按种类并发。
+- 还没有 dsh 里"给人的消息多留一个 Worker 槽位"的规则。
+- 还不能从命令行叫停工单（`stop`）：叫停要通知正在运行的进程，需要 F3 的 HTTP API 或控制通道。
+- 对外发送是"至少一次"：发出后、记账前崩溃，重启后会再发一次。命令行 Source 用消息 id 去重，所以不会重复；以后接飞书、邮件，也要靠消息 id 去重。
+- Worker 失败时，单个工单的投递失败（`delivery_failed`）还没有用上：进程内投递不会失败。
+
 ## 9. 待定
 
 - 单进程是否够用，还是一开始就把 Executor 放到独立进程/机器？

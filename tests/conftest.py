@@ -61,7 +61,7 @@ class FakeScope:
 class Harness:
     policy: Any = field(default_factory=FakePolicy)
     prepare_ticket: Callable | None = None
-    repo: MemoryRepositories = field(default_factory=MemoryRepositories)
+    repo: Any = field(default_factory=MemoryRepositories)
     outbox: list[OutboundMessage] = field(default_factory=list)
     withdrawn: list[str] = field(default_factory=list)
     requests: list[Candidate] = field(default_factory=list)
@@ -159,6 +159,10 @@ class Harness:
         return sorted(self.repo.decisions.by_thread(thread), key=lambda d: d.at)
 
 
-@pytest.fixture
-def h() -> Harness:
+@pytest.fixture(params=["memory", "sqlite"])
+def h(request, tmp_path) -> Harness:
+    """Every Engine test runs on the in-memory repositories and on the SQLite Store."""
+    if request.param == "sqlite":
+        from continuum.runtime.store import SQLiteStore
+        return Harness(repo=SQLiteStore(tmp_path / "test.db"))
     return Harness()

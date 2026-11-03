@@ -19,19 +19,35 @@
 - [项目大纲](docs/outline.md)：定位、要解决的问题、切入场景、目标、相似项目、架构、模块设计、技术选型、路线图、风险。
 - [框架设计（草案）](docs/framework.md)：用 Python 复刻 dsh-superagent 的核心思想，内核小、扩展点多。
 
-## 开发
+## 试一下
 
 ```bash
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
+
+.venv/bin/continuum init                 # 在 ./.continuum 建一个 home，写默认设置
+.venv/bin/continuum run                  # 在另一个终端里一直跑着
+.venv/bin/continuum send "帮我检查这版 BOM 报价"   # 发一句话，等确认和结果
+.venv/bin/continuum send "顺便核一下交期" --no-mention   # 同一话题追加，原工单自动恢复
+.venv/bin/continuum status               # 看工单
+.venv/bin/continuum log                  # 看所有回复
+```
+
+- 谁能派活写在 `.continuum/continuum.toml` 的 `[policy.sources.cli].allowed`，默认是 `me`（`send --as` 的默认值）。
+- 换 Worker：在 `.continuum/plugins/` 放一个定义了 `plugin = Plugin(name=..., scripts={...})` 的 `.py` 文件，再把 `[executor.config].script` 改成脚本名，不用改任何核心代码。
+- 进程随时可以被杀掉；重启后，干到一半的工单会带着恢复说明重新开始，已经发出的消息不会再发。
+
+## 开发
+
+```bash
 .venv/bin/python -m pytest -q
 .venv/bin/ruff check src tests
 ```
 
 ## 状态
 
-- F0 内核已完成：领域模型、Engine 五部分、Gate 规则链与标准 Gate、研判校验、策略变更影响、内存仓库，50 个测试。
-- 下一步 F1：SQLite、Effects 队列、Outbox、调度循环、插件注册表。
-- 首个切入场景拟为制造业 BOM 报价与采购跟进。
+- F0 内核已完成：领域模型、Engine 五部分、Gate 规则链与标准 Gate、研判校验、策略变更影响。
+- F1 运行时已完成：SQLite 存储、Effects 队列、Outbox、调度循环、插件注册表、进程内执行器、命令行 Source、规则版 Router、脚本 Worker、`continuum` 命令。
+- 下一步 F2：接入模型，做 Router 会话和 agent Worker。
 
 `core` 和 `policy` 移植自 dsh-superagent（MIT），见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
