@@ -75,10 +75,11 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         page.fill("#input", "顺便核一下交期")
         page.press("#input", "Enter")
         page.wait_for_selector(".msg.reply")
-        assert [page.locator(".msg").nth(i).get_attribute("class") for i in range(5)] == [
-            "msg user", "msg acknowledgement", "msg user", "msg acknowledgement", "msg reply"]
+        roles = [page.locator(".msg").nth(i).get_attribute("class").split()[1] for i in range(5)]
+        assert roles == ["user", "acknowledgement", "user", "acknowledgement", "reply"]
         assert page.input_value("#input") == ""
         if SHOTS:
+            page.wait_for_timeout(400)
             page.screenshot(path=f"{SHOTS}/desktop-chat.png")
 
         # Tickets: what waits for a person comes first, and a stop asks once more before it acts.
@@ -86,6 +87,7 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         assert page.locator(".group").all_inner_texts() == ["等你处理 · 1", "进行中 · 1", "已结束 · 1"]
         assert "0402 还是 0603" in page.inner_text(".card.person .question")
         if SHOTS:
+            page.wait_for_timeout(400)
             page.screenshot(path=f"{SHOTS}/desktop-tickets.png")
         working = page.locator(".card.working")
         working.get_by_role("button", name="停止").click()

@@ -63,7 +63,9 @@ function createWindow() {
     show: false,
     title: 'Continuum',
     icon: icon(),
-    backgroundColor: '#f6f7f9',
+    backgroundColor: '#060d15',
+    // The window draws its own title bar (renderer/index.html .titlebar).
+    frame: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -164,6 +166,9 @@ handle('api:post', (thread, text) =>
 handle('api:tickets', () => client.request('GET', '/api/v1/tickets'));
 handle('api:stop', (id) => client.request('POST', `/api/v1/tickets/${encodeURIComponent(id)}/stop`, {}));
 handle('api:retry', (id) => client.request('POST', `/api/v1/tickets/${encodeURIComponent(id)}/retry`));
+
+ipcMain.on('window:minimize', () => win && win.minimize());
+ipcMain.on('window:hide', () => win && win.hide());
 
 // --- lifecycle ----------------------------------------------------------------------------------------------------
 

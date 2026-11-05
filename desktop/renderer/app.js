@@ -7,7 +7,17 @@
   const state = {
     user: '', connection: 'offline', view: 'chat', thread: 'main',
     threads: [], messages: new Map(), tickets: new Map(), unread: new Set(),
+    // What has been on screen already: only what is new plays its entrance.
+    shown: new Set(),
   };
+
+  function arrival(node, key) {
+    if (!state.shown.has(key)) {
+      state.shown.add(key);
+      node.classList.add('arrived');
+    }
+    return node;
+  }
 
   const STAGES = {
     'person/answer': '等你回答', 'person/review': '等你看结果', 'person/blocked': '卡住了',
@@ -15,6 +25,14 @@
     working: '进行中', idle: '等待中',
   };
   const OUTCOMES = { completed: '已完成', stopped: '已停止', dropped: '无需处理', merged: '已合并', closed: '已关闭' };
+  // The HUD's own words beside the Chinese ones; screen readers skip them.
+  const STAGES_EN = {
+    'person/answer': 'AWAITING ORDERS', 'person/review': 'DEBRIEF READY', 'person/blocked': 'BLOCKED',
+    'person/failed': 'MISSION FAILED', 'person/delivery': 'COMMS FAILURE', 'working/queued': 'STANDBY',
+    working: 'IN PROGRESS', idle: 'HOLDING',
+  };
+  const OUTCOMES_EN = { completed: 'MISSION COMPLETE', stopped: 'ABORTED', dropped: 'STOOD DOWN', merged: 'MERGED', closed: 'CLOSED' };
+  const LINK = { online: 'LINK ESTABLISHED', connecting: 'ACQUIRING LINK…', offline: 'LINK LOST', unauthorized: 'AUTH REJECTED' };
 
   async function call(method, ...args) {
     const result = await api[method](...args);
@@ -29,9 +47,18 @@
     return node;
   }
 
+  // An instrument label: decoration for the eye, hidden from screen readers.
+  function en(text) {
+    const node = el('span', 'en', text);
+    node.setAttribute('aria-hidden', 'true');
+    return node;
+  }
+
   function time(iso) {
     const d = new Date(iso);
-    return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (Number.isNaN(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
   function showStatus(text) {
@@ -173,9 +200,14 @@
     const box = $('messages');
     box.replaceChildren(...list.map((m) => {
       const item = el('li', `msg ${m.role}`);
-      item.append(el('div', 'text', m.role === 'acknowledgement' ? `✓ ${m.text}` : m.text));
+      if (m.role === 'user' || m.role === 'reply') {
+        const tag = el('div', 'tag', m.role === 'user' ? `${state.user || 'YOU'} ▸` : '◂ CONTINUUM');
+        tag.setAttribute('aria-hidden', 'true');
+        item.append(tag);
+      }
+      item.append(el('div', 'text', m.text));
       if (m.role !== 'acknowledgement') item.append(el('div', 'meta', time(m.at)));
-      return item;
+      return arrival(item, `m:${m.id}`);
     }));
     $('empty-chat').hidden = list.length > 0;
     box.scrollTop = box.scrollHeight;
@@ -218,19 +250,41 @@
     renderTickets();
   }
 
+  function stageKey(t) {
+    return t.action ? `${t.stage}/${t.action}` : t.stage;
+  }
+
   function stageText(t) {
     if (t.stage === 'ended') return OUTCOMES[t.outcome] || t.outcome;
-    return STAGES[t.action ? `${t.stage}/${t.action}` : t.stage] || t.stage;
+    return STAGES[stageKey(t)] || t.stage;
+  }
+
+  function stageEn(t) {
+    if (t.stage === 'ended') return OUTCOMES_EN[t.outcome] || String(t.outcome || '').toUpperCase();
+    return STAGES_EN[stageKey(t)] || t.stage.toUpperCase();
   }
 
   function card(t) {
-    const box = el('article', `card ${t.stage}`);
+    const box = el('article', `card frame ${t.stage}`);
     const head = el('div', 'card-head');
+    const id = el('span', 'mission-id', `MSN-${t.id.slice(0, 4).toUpperCase()}`);
+    id.setAttribute('aria-hidden', 'true');
+    head.append(id);
+    const pill = el('span', `pill ${t.stage} ${t.action || ''} ${t.outcome || ''}`.trim());
+    pill.append(el('span', '', stageText(t)), en(stageEn(t)));
+    head.append(pill);
     head.append(el('div', 'card-title', t.title));
-    head.append(el('span', `pill ${t.stage}`, stageText(t)));
     box.append(head);
-    if (t.question) box.append(el('div', 'question', t.question));
-    if (t.report && t.report.summary) box.append(el('div', 'summary', t.report.summary));
+    if (t.question) {
+      const question = el('div', 'question');
+      question.append(en('REQUEST FOR ORDERS'), document.createTextNode(t.question));
+      box.append(question);
+    }
+    if (t.report && t.report.summary) {
+      const summary = el('div', 'summary');
+      summary.append(en('SITREP'), document.createTextNode(t.report.summary));
+      box.append(summary);
+    }
     const actions = el('div', 'actions');
     if (t.thread) {
       const open = el('button', 'ghost', t.question ? '去回答' : '看对话');
@@ -248,7 +302,7 @@
       actions.append(retry);
     }
     if (t.stage !== 'ended') {
-      const stop = el('button', 'ghost', '停止');
+      const stop = el('button', 'ghost danger', '停止');
       stop.addEventListener('click', () => {
         if (stop.dataset.confirm) act('stop', t.id);
         else { stop.dataset.confirm = '1'; stop.textContent = '确认停止？'; }
@@ -256,7 +310,7 @@
       actions.append(stop);
     }
     box.append(actions);
-    return box;
+    return arrival(box, `t:${t.id}:${t.stage}:${t.outcome || ''}`);
   }
 
   async function act(method, id) {
@@ -273,18 +327,20 @@
   function renderTickets() {
     const all = [...state.tickets.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
     const groups = [
-      ['等你处理', all.filter((t) => t.stage === 'person')],
-      ['进行中', all.filter((t) => t.stage === 'working' || t.stage === 'idle')],
-      ['已结束', all.filter((t) => t.stage === 'ended').slice(0, 10)],
+      ['等你处理', 'AWAITING ORDERS', 'person', all.filter((t) => t.stage === 'person')],
+      ['进行中', 'ACTIVE OPERATIONS', 'working', all.filter((t) => t.stage === 'working' || t.stage === 'idle')],
+      ['已结束', 'MISSION LOG', 'ended', all.filter((t) => t.stage === 'ended').slice(0, 10)],
     ];
     const box = $('tickets');
     box.replaceChildren();
-    for (const [name, items] of groups) {
+    for (const [name, label, kind, items] of groups) {
       if (!items.length) continue;
-      box.append(el('h2', 'group', `${name} · ${items.length}`), ...items.map(card));
+      const row = el('div', `group-row ${kind}`);
+      row.append(el('h2', 'group', `${name} · ${items.length}`), en(label));
+      box.append(row, ...items.map(card));
     }
     $('empty-tickets').hidden = all.length > 0;
-    const waiting = groups[0][1].length;
+    const waiting = groups[0][3].length;
     $('badge').hidden = waiting === 0;
     $('badge').textContent = String(waiting);
   }
@@ -303,6 +359,7 @@
     const was = state.connection;
     state.connection = connection;
     $('dot').dataset.state = connection;
+    $('link-text').textContent = LINK[connection] || connection.toUpperCase();
     $('dot').title = { online: '已连接', connecting: '连接中', offline: '未连接', unauthorized: '登录已失效' }[connection] || connection;
     if (connection === 'unauthorized') {
       showSetup('', '登录已失效，请重新输入令牌。');
@@ -315,11 +372,21 @@
     }
   });
 
+  // --- the window's own title bar (the app window has no frame) ---
+
+  if (api.minimize && api.hide) {
+    $('win-min').addEventListener('click', () => api.minimize());
+    $('win-close').addEventListener('click', () => api.hide());
+  } else {
+    document.querySelector('.window-controls').hidden = true;
+  }
+
   // --- start ---
 
   (async function start() {
     const config = await call('getConfig');
     $('dot').dataset.state = config.connection;
+    $('link-text').textContent = LINK[config.connection] || '';
     if (config.configured) await showMain(config.user);
     else showSetup(config.server);
     $('app').dataset.ready = '1';

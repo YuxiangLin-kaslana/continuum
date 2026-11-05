@@ -2,62 +2,88 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Continuum</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="app">
+    <!-- The title bar: the window has no frame of its own, so this strip is where it is dragged. -->
+    <div class="titlebar">
+      <span class="ident"><span class="mark">续</span><span class="callsign">CONTINUUM</span><span class="build" aria-hidden="true">TACTICAL ASSISTANT // v0.0.2</span></span>
+      <span class="window-controls">
+        <button id="win-min" class="win min" title="最小化" aria-label="最小化"></button>
+        <button id="win-close" class="win close" title="收进托盘" aria-label="收进托盘"></button>
+      </span>
+    </div>
+
     <section id="setup" class="setup" hidden>
-      <div class="setup-card">
-        <div class="brand"><span class="mark">续</span><span>Continuum</span></div>
-        <p class="lead">连接到你的 Continuum 服务器。令牌由管理员用 <code>continuum user add</code> 生成，只显示一次。</p>
+      <div class="setup-card frame">
+        <div class="radar" aria-hidden="true">
+          <div class="rings"></div>
+          <div class="sweep"></div>
+          <div class="blip"></div>
+        </div>
+        <p class="hud-label" aria-hidden="true">// ESTABLISH UPLINK</p>
+        <h1 class="setup-title">连接到 Continuum 服务器</h1>
+        <p class="lead">令牌由管理员在服务器上用 <code>continuum user add</code> 生成，只显示一次。</p>
         <form id="setup-form">
-          <label for="server">服务器地址</label>
-          <input id="server" name="server" type="url" placeholder="https://continuum.example.com" required autocomplete="url">
-          <label for="token">令牌</label>
-          <input id="token" name="token" type="password" placeholder="ctm_…" required autocomplete="off">
+          <label for="server">服务器地址 <span class="en" aria-hidden="true">UPLINK</span></label>
+          <input id="server" name="server" type="url" placeholder="https://continuum.example.com" required autocomplete="url" spellcheck="false">
+          <label for="token">令牌 <span class="en" aria-hidden="true">AUTH CODE</span></label>
+          <input id="token" name="token" type="password" placeholder="ctm_…" required autocomplete="off" spellcheck="false">
           <p id="setup-error" class="error" role="alert" hidden></p>
-          <button id="connect" type="submit" class="primary">连接</button>
+          <button id="connect" type="submit" class="primary">连接 <span class="en" aria-hidden="true">ENGAGE</span></button>
         </form>
       </div>
     </section>
 
     <section id="main" class="main" hidden>
       <header class="bar">
-        <div class="who">
+        <div class="link">
           <span id="dot" class="dot" title="连接状态"></span>
-          <span id="user" class="user"></span>
+          <span id="link-text" class="link-text" aria-hidden="true">LINK OFFLINE</span>
+          <span class="pilot"><span class="en" aria-hidden="true">PILOT</span> <span id="user" class="user"></span></span>
         </div>
         <nav class="tabs" role="tablist">
-          <button id="tab-chat" role="tab" aria-selected="true" data-view="chat">对话</button>
-          <button id="tab-tickets" role="tab" aria-selected="false" data-view="tickets">工单<span id="badge" class="badge" hidden></span></button>
+          <button id="tab-chat" role="tab" aria-selected="true" data-view="chat">对话<span class="en" aria-hidden="true">COMMS</span></button>
+          <button id="tab-tickets" role="tab" aria-selected="false" data-view="tickets">工单<span class="en" aria-hidden="true">MISSIONS</span><span id="badge" class="badge" hidden></span></button>
         </nav>
-        <button id="menu" class="ghost" title="退出登录">退出</button>
+        <button id="menu" class="ghost logout" title="退出登录">退出</button>
       </header>
 
       <div id="view-chat" class="view chat">
         <div class="threads">
           <label for="thread" class="sr">对话</label>
+          <span class="hud-label" aria-hidden="true">CHANNEL</span>
           <select id="thread"></select>
           <button id="new-thread" class="ghost" title="新对话">＋ 新对话</button>
         </div>
         <ol id="messages" class="messages" aria-live="polite"></ol>
-        <p id="empty-chat" class="empty" hidden>说一件你想交给它的事，比如“帮我检查这版 BOM 报价有没有问题”。</p>
+        <div id="empty-chat" class="empty" hidden>
+          <span class="hud-label" aria-hidden="true">NO TRANSMISSIONS</span>
+          <p>说一件你想交给它的事，比如“帮我检查这版 BOM 报价有没有问题”。</p>
+        </div>
         <form id="composer" class="composer">
           <label for="input" class="sr">消息</label>
-          <textarea id="input" rows="2" placeholder="交代一件事，Enter 发送，Shift+Enter 换行"></textarea>
-          <button id="send" type="submit" class="primary">发送</button>
+          <div class="input-frame frame">
+            <span class="prompt" aria-hidden="true">&gt;</span>
+            <textarea id="input" rows="2" placeholder="交代一件事，Enter 发送，Shift+Enter 换行"></textarea>
+          </div>
+          <button id="send" type="submit" class="primary">发送<span class="en" aria-hidden="true">TRANSMIT</span></button>
         </form>
       </div>
 
       <div id="view-tickets" class="view tickets" hidden>
         <div id="tickets"></div>
-        <p id="empty-tickets" class="empty" hidden>还没有工单。在对话里交代一件事，接下来就会出现在这里。</p>
+        <div id="empty-tickets" class="empty" hidden>
+          <span class="hud-label" aria-hidden="true">NO ACTIVE MISSIONS</span>
+          <p>还没有工单。在对话里交代一件事，接下来就会出现在这里。</p>
+        </div>
       </div>
 
-      <footer id="status" class="status" hidden></footer>
+      <footer id="status" class="status" role="status" hidden></footer>
     </section>
   </div>
   <script src="app.js"></script>

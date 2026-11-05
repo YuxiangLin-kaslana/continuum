@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('continuum', {
   tickets: call('api:tickets'),
   stop: call('api:stop'),
   retry: call('api:retry'),
+  minimize: () => ipcRenderer.send('window:minimize'),
+  hide: () => ipcRenderer.send('window:hide'),
   onEvent: (fn) => ipcRenderer.on('event', (_e, event) => fn(event)),
   onState: (fn) => ipcRenderer.on('state', (_e, state) => fn(state)),
 });

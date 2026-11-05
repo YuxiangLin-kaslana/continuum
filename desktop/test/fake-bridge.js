@@ -53,6 +53,8 @@
       return ok(t);
     },
     retry: (id) => ok(tickets.find((x) => x.id === id)),
+    minimize: () => {},
+    hide: () => {},
     onEvent: (fn) => listeners.event.push(fn),
     onState: (fn) => listeners.state.push(fn),
   };
