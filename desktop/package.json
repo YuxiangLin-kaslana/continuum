@@ -1,7 +1,7 @@
 {
   "name": "continuum-desktop",
   "productName": "Continuum",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Continuum（续）桌面端",
   "main": "main.js",
   "private": true,
@@ -20,9 +20,25 @@
   "build": {
     "appId": "ai.continuum.desktop",
     "productName": "Continuum",
-    "directories": { "output": "dist" },
-    "files": ["main.js", "preload.js", "lib/**", "renderer/**", "assets/**", "package.json"],
-    "win": { "target": "nsis", "icon": "assets/icon.png" },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "lib/**",
+      "renderer/**",
+      "assets/**",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.png",
+      "artifactName": "Continuum-Setup-${version}.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

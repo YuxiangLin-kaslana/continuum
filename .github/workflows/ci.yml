@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ["desktop-v*"]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -37,7 +37,10 @@ jobs:
 
   desktop:
     name: Desktop (Windows)
+    needs: test
     runs-on: windows-latest
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: desktop
@@ -59,3 +62,17 @@ jobs:
           name: continuum-desktop-windows
           path: desktop/dist/*.exe
           if-no-files-found: error
+      - name: Publish the release (tags v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          packaged="$(node -p "require('./package.json').version")"
+          if [ "$packaged" != "$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match desktop/package.json version $packaged" >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" "dist/Continuum-Setup-${version}.exe" \
+            --title "Continuum ${version}" --notes-file "../docs/releases/${GITHUB_REF_NAME}.md"
