@@ -36,6 +36,7 @@ uv pip install --python .venv/bin/python -e ".[dev]"
 - 桌面端和其他客户端走 API（默认 `127.0.0.1:8170`）：`continuum user add <名字> --device <设备>` 发一个令牌（只显示一次），再把这个名字写进 `[policy.sources.app].allowed`。接口文档在运行时的 `/api/docs`。放到服务器上时，API 只监听本机，前面用 Caddy 之类的反向代理加 HTTPS。
 - 谁能派活写在 `.continuum/continuum.toml` 的 `[policy.sources.cli].allowed`，默认是 `me`（`send --as` 的默认值）。
 - 换 Worker：在 `.continuum/plugins/` 放一个定义了 `plugin = Plugin(name=..., scripts={...})` 的 `.py` 文件，再把 `[executor.config].script` 改成脚本名，不用改任何核心代码。
+- 服务器部署：API 只监听本机，外面经 Caddy 转发（和 sekai、ATRI 一样在 Cloudflare 后面）。第一次运行 `sudo bash deploy/install-caddy.sh <域名>`，之后改 `/etc/caddy/continuum.caddy` 不用 sudo。
 - 进程随时可以被杀掉；重启后，干到一半的工单会带着恢复说明重新开始，已经发出的消息不会再发。
 
 ## 开发

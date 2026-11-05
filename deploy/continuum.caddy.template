@@ -1,0 +1,21 @@
+# ---- __DOMAIN__ -> Continuum API (127.0.0.1:8170) ----
+# Same pattern as sekai and atri: behind Cloudflare's proxy, a self-signed origin certificate on 443
+# (Cloudflare SSL/TLS mode "Full"). The API checks every request's token itself.
+# Installed as /etc/caddy/continuum.caddy (owned by ec2-user) by install-caddy.sh; after that, edit it and run
+# `caddy reload --config /etc/caddy/Caddyfile` without sudo.
+(continuum_api) {
+	encode gzip
+	# WebSocket stream and HTTP API alike; long-lived streams are kept open.
+	reverse_proxy 127.0.0.1:8170 {
+		flush_interval -1
+	}
+}
+
+http://__DOMAIN__ {
+	import continuum_api
+}
+
+https://__DOMAIN__ {
+	tls /etc/caddy/ssl/o2ai-selfsigned.crt /etc/caddy/ssl/o2ai-selfsigned.key
+	import continuum_api
+}
