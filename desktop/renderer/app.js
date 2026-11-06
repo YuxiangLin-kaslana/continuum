@@ -80,7 +80,7 @@
     return node;
   }
 
-  // An instrument label: decoration for the eye, hidden from screen readers.
+  // An English label beside the Chinese: decoration for the eye, hidden from screen readers.
   function en(text) {
     const node = el('span', 'en', text);
     node.setAttribute('aria-hidden', 'true');
@@ -536,7 +536,7 @@
       box.append(check);
     }
     const top = el('div', 'card-top');
-    const id = el('span', 'mission-id', `MSN-${t.id.replace(/[^A-Za-z0-9]/g, '').slice(-4).toUpperCase()}`);
+    const id = el('span', 'ticket-id', `#${t.id.replace(/[^A-Za-z0-9]/g, '').slice(-4).toUpperCase()}`);
     id.setAttribute('aria-hidden', 'true');
     top.append(id, el('span', 'stage', stageText(t)));
     box.append(top, el('div', 'card-title', t.title));
@@ -603,9 +603,9 @@
   function renderTickets() {
     const all = [...state.tickets.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
     const groups = [
-      ['等你处理', 'AWAITING ORDERS', 'person', all.filter((t) => t.stage === 'person')],
+      ['等你处理', 'NEEDS YOU', 'person', all.filter((t) => t.stage === 'person')],
       ['执行中', 'IN PROGRESS', 'working', all.filter((t) => t.stage === 'working' || t.stage === 'idle')],
-      ['已结束', 'MISSION COMPLETE', 'ended', all.filter((t) => t.stage === 'ended').slice(0, 10)],
+      ['已结束', 'ENDED', 'ended', all.filter((t) => t.stage === 'ended').slice(0, 10)],
     ];
     const box = $('tickets');
     box.replaceChildren();
