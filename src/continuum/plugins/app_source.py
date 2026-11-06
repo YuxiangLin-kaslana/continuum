@@ -23,7 +23,13 @@ CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT NOT NULL, thread TEXT NOT NULL, role TEXT NOT NULL,
   text TEXT NOT NULL, message_id TEXT UNIQUE, reply_to TEXT, ticket_id TEXT, at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS messages_thread ON messages (user, thread, id);
+CREATE TABLE IF NOT EXISTS steps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT NOT NULL, thread TEXT NOT NULL, ticket_id TEXT NOT NULL,
+  key TEXT NOT NULL, name TEXT NOT NULL, input TEXT NOT NULL, output TEXT NOT NULL, status TEXT NOT NULL,
+  at TEXT NOT NULL, ended_at TEXT, UNIQUE (user, ticket_id, key));
+CREATE INDEX IF NOT EXISTS steps_thread ON steps (user, thread, id);
 """
+STEP_COLUMNS = ("id", "user", "thread", "ticket_id", "key", "name", "input", "output", "status", "at", "ended_at")
 COLUMNS = ("id", "user", "thread", "role", "text", "message_id", "reply_to", "ticket_id", "at")
 
 
@@ -107,6 +113,32 @@ class AppSource:
             f"SELECT {', '.join(COLUMNS)} FROM messages WHERE user = ? AND thread = ? AND id > ? ORDER BY id LIMIT ?",
             (user, thread, after, limit)).fetchall()
         return [dict(zip(COLUMNS, row, strict=True)) for row in rows]
+
+    def steps(self, ctx: Any, user: str, thread: str, limit: int = 300) -> list[dict[str, Any]]:
+        """The latest steps the workers took in a conversation, oldest first."""
+        rows = self._db(ctx).execute(
+            f"SELECT {', '.join(STEP_COLUMNS)} FROM steps WHERE user = ? AND thread = ? ORDER BY id DESC LIMIT ?",
+            (user, thread, limit)).fetchall()
+        return [dict(zip(STEP_COLUMNS, row, strict=True)) for row in reversed(rows)]
+
+    def activity(self, ctx: Any, user: str, thread: str, ticket_id: str, event: dict[str, Any]) -> None:
+        """What a worker is doing for this conversation: a step is kept (a running one is updated when it ends);
+        the answer as it is written, and the model thinking, are only passed to the open streams."""
+        if event.get("type") != "step":
+            self.publish(user, {**event, "ticket_id": ticket_id, "thread": thread})
+            return
+        now = datetime.now(UTC).isoformat()
+        ended = None if event["status"] == "running" else now
+        db = self._db(ctx)
+        db.execute(
+            "INSERT INTO steps (user, thread, ticket_id, key, name, input, output, status, at, ended_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (user, ticket_id, key) DO UPDATE SET "
+            "output = excluded.output, status = excluded.status, ended_at = excluded.ended_at",
+            (user, thread, ticket_id, str(event["key"]), str(event["name"]), str(event.get("input", "")),
+             str(event.get("output", "")), str(event["status"]), now, ended))
+        row = db.execute(f"SELECT {', '.join(STEP_COLUMNS)} FROM steps WHERE user = ? AND ticket_id = ? AND key = ?",
+                         (user, ticket_id, str(event["key"]))).fetchone()
+        self.publish(user, {"type": "step", "step": dict(zip(STEP_COLUMNS, row, strict=True))})
 
     def threads(self, ctx: Any, user: str) -> list[dict[str, Any]]:
         rows = self._db(ctx).execute(

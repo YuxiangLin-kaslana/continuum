@@ -95,7 +95,8 @@ class Runtime:
                 self.store, self.effects, self.home, executor_kind,
                 self._config(executor_kind, self.settings.executor.config, "executor"), self.registry.scripts,
                 self.settings.executor.max_workers, self.router.relay, paused=lambda: self.policy.paused,
-                on_report=self.notify_ticket, models=self.models)
+                on_report=self.notify_ticket, models=self.models,
+                on_activity=self.notify_activity)
             self.outbox = StoreOutbox(self.store, self.effects, self._send)
             self.engine = Engine(EngineOptions(
                 repo=self.store, policy=lambda: self.policy, scope=self, assessor=self.router,
@@ -205,6 +206,20 @@ class Runtime:
                 users.add(ticket.mandate.actor.id)
             for user in users:
                 ctx.kind.publish(user, {"type": "ticket", "id": ticket_id})
+
+    def notify_activity(self, ticket_id: str, event: dict[str, Any]) -> None:
+        """Pass what a worker turn is doing to the conversations its ticket answers in: steps are kept there, the rest
+        is only shown to whoever is watching."""
+        ticket = self.store.tickets.get(ticket_id)
+        if ticket is None:
+            return
+        for ctx in self.sources.values():
+            if ctx.kind.kind != "app":
+                continue
+            places = {(c.address["user"], c.address["thread"]) for c in ticket.channels
+                      if c.source == ctx.instance and "user" in c.address and "thread" in c.address}
+            for user, thread in places:
+                ctx.kind.activity(ctx, user, thread, ticket_id, event)
 
     # --- running ---
 

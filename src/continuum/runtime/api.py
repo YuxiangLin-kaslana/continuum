@@ -158,6 +158,11 @@ def create_app(rt: Runtime) -> FastAPI:
         kind, ctx = source()
         return kind.history(ctx, user, thread_name(thread), after)
 
+    @app.get("/api/v1/threads/{thread}/steps")
+    async def steps(thread: str, user: str = Depends(user_of)) -> list[dict[str, Any]]:
+        kind, ctx = source()
+        return kind.steps(ctx, user, thread_name(thread))
+
     @app.post("/api/v1/threads/{thread}/messages", status_code=201)
     async def post(thread: str, body: PostMessage, user: str = Depends(user_of)) -> dict[str, Any]:
         kind, ctx = source()

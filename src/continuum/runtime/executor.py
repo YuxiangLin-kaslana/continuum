@@ -82,6 +82,13 @@ class Job:
             answers=answers))
         self.reports.append(state)
 
+    def activity(self, event: dict[str, Any]) -> None:
+        """Show the people the ticket belongs to what the turn is doing now: a step (a tool call, kept with their
+        conversation), the answer as it is being written, or that the model is thinking. Nothing in the domain
+        depends on it."""
+        if self._session.host.on_activity and not self._session.stopped:
+            self._session.host.on_activity(self.ticket_id, event)
+
     def handback(self, trigger_id: str, reason: str) -> bool:
         """Return a person's message that asks for more than this ticket, for a fresh judgement."""
         return self._session.host.engine.handback(self.ticket_id, trigger_id, reason)
@@ -191,7 +198,7 @@ class InProcessExecutor:
     def __init__(self, store: SQLiteStore, effects: Effects, home: Path, kind: ExecutorKind, config: Any,
                  scripts: dict[str, Script], max_workers: int, relay: Callable[[Relay], None],
                  paused: Callable[[], bool] = lambda: False, on_report: Callable[[str], None] | None = None,
-                 models: Any = None):
+                 models: Any = None, on_activity: Callable[[str, dict[str, Any]], None] | None = None):
         self.store = store
         self.effects = effects
         self.home = home
@@ -201,6 +208,7 @@ class InProcessExecutor:
         self.relay = relay
         self.paused = paused
         self.on_report = on_report
+        self.on_activity = on_activity
         self.sessions: dict[str, Session] = {}
         # Every running turn, including one whose session was stopped and is still finishing: each holds a slot.
         self.turns: set[asyncio.Task] = set()

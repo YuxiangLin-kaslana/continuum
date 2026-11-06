@@ -10,6 +10,8 @@ import asyncio
 import json
 import logging
 import os
+import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -90,10 +92,104 @@ class ChatModel:
             delay = min(delay * 2, 30)
         raise ModelError(f"model {self.name}: no answer")  # pragma: no cover
 
+    async def stream(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
+                     on_progress: Callable[[dict[str, Any]], None] | None = None, **extra: Any) -> dict[str, Any]:
+        """`complete`, streamed: `on_progress` sees the assistant message as it grows (content, reasoning and tool
+        calls with their arguments so far), and the whole message is returned the same way `complete` returns it. A
+        retry starts the message over, so `on_progress` may see it shrink."""
+        body: dict[str, Any] = {"model": self.settings.model, "messages": messages, **self.settings.extra, **extra,
+                                "stream": True}
+        if tools:
+            body["tools"] = tools
+        delay = 2.0
+        for attempt in range(self.settings.retries + 1):
+            try:
+                async with self._http().stream("POST", "/chat/completions", json=body) as response:
+                    if response.status_code == 200:
+                        return await _gather(response, on_progress)
+                    text = (await response.aread()).decode("utf-8", "replace")
+                    if response.status_code not in TRANSIENT or attempt == self.settings.retries:
+                        raise ModelError(f"model {self.name}: HTTP {response.status_code}: {text[:500]}")
+            except (httpx.TransportError, json.JSONDecodeError) as error:
+                if attempt == self.settings.retries:
+                    raise ModelError(f"model {self.name}: {type(error).__name__}: {error}") from error
+            log.warning("model %s: attempt %d failed, retrying in %.0fs", self.name, attempt + 1, delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 30)
+        raise ModelError(f"model {self.name}: no answer")  # pragma: no cover
+
     async def close(self) -> None:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+
+
+async def _gather(response: httpx.Response, on_progress: Callable[[dict[str, Any]], None] | None) -> dict[str, Any]:
+    """Put a streamed answer (server-sent events of deltas) back together into one assistant message."""
+    message: dict[str, Any] = {"role": "assistant", "content": ""}
+    calls: dict[int, dict[str, Any]] = {}
+    async for line in response.aiter_lines():
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if data == "[DONE]":
+            break
+        choices = json.loads(data).get("choices") or []
+        delta = (choices[0].get("delta") or {}) if choices else {}
+        if not delta:
+            continue
+        if delta.get("content"):
+            message["content"] += delta["content"]
+        if delta.get("reasoning_content"):
+            message["reasoning_content"] = message.get("reasoning_content", "") + delta["reasoning_content"]
+        for part in delta.get("tool_calls") or []:
+            call = calls.setdefault(part.get("index", 0),
+                                    {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+            call["id"] = part.get("id") or call["id"]
+            function = part.get("function") or {}
+            call["function"]["name"] += function.get("name") or ""
+            call["function"]["arguments"] += function.get("arguments") or ""
+        if calls:
+            message["tool_calls"] = [calls[i] for i in sorted(calls)]
+        if on_progress:
+            on_progress(message)
+    return message
+
+
+def partial_string(raw: str, field: str) -> str | None:
+    """The value of a string field in a JSON object that is still arriving, as far as it has come; None before the
+    field starts. Only the first such field is read, wherever it is."""
+    match = re.search(r'"%s"\s*:\s*"' % re.escape(field), raw)
+    if match is None:
+        return None
+    out: list[str] = []
+    i = match.end()
+    while i < len(raw):
+        c = raw[i]
+        if c == '"':
+            break
+        if c == "\\":
+            if i + 1 >= len(raw):
+                break
+            escaped = raw[i + 1]
+            if escaped == "u":
+                try:
+                    out.append(chr(int(raw[i + 2:i + 6], 16)) if i + 6 <= len(raw) else "")
+                except ValueError:
+                    break
+                if i + 6 > len(raw):
+                    break
+                i += 6
+                continue
+            out.append(ESCAPES.get(escaped, escaped))
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f"}
 
 
 def tool(name: str, description: str, properties: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:

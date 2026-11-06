@@ -11,7 +11,7 @@ import tomllib
 import httpx
 import pytest
 
-from continuum.models import ChatModel, ModelError, ModelSettings, tool_calls
+from continuum.models import ChatModel, ModelError, ModelSettings, partial_string, tool_calls
 from continuum.plugins import BUILTINS, cli_source, sandbox
 from continuum.plugins.agent_executor import transcript_path
 from continuum.plugins.sandbox import SandboxConfig
@@ -259,3 +259,103 @@ def test_the_agent_cannot_write_outside_its_workspace(tmp_path):
     assert not (tmp_path / "work" / "escape.txt").exists()
 
 
+
+
+# --- streaming: what a person sees while the worker works ---------------------------------------------------------
+
+
+def _sse(*chunks):
+    lines = [f"data: {json.dumps({'choices': [{'delta': c}]}, ensure_ascii=False)}\n\n" for c in chunks]
+    return ("".join(lines) + "data: [DONE]\n\n").encode()
+
+
+def test_the_model_client_streams_and_puts_the_message_back_together(monkeypatch):
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        if len(calls) == 1:
+            return httpx.Response(503, text="busy")
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=_sse(
+            {"role": "assistant", "reasoning_content": "想"}, {"reasoning_content": "一想"},
+            {"content": "先看看"},
+            {"tool_calls": [{"index": 0, "id": "c1", "function": {"name": "report", "arguments": '{"state": "ready", '}}]},
+            {"tool_calls": [{"index": 0, "function": {"arguments": '"summary": "做完\\n了'}}]},
+            {"tool_calls": [{"index": 0, "function": {"arguments": '"}'}}]}))
+
+    monkeypatch.setenv("TEST_KEY", "k")
+    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+    model = ChatModel("t", ModelSettings(api_key_env="TEST_KEY"), transport=httpx.MockTransport(handler))
+    seen = []
+
+    async def main():
+        message = await model.stream([{"role": "user", "content": "hi"}], tools=[{"type": "function"}],
+                                     on_progress=lambda m: seen.append(json.loads(json.dumps(m))))
+        await model.close()
+        return message
+
+    message = asyncio.run(main())
+    assert calls[-1]["stream"] is True and len(calls) == 2
+    assert message["content"] == "先看看" and message["reasoning_content"] == "想一想"
+    assert tool_calls(message) == [("c1", "report", {"state": "ready", "summary": "做完\n了"})]
+    assert [partial_string(m["tool_calls"][0]["function"]["arguments"], "summary") for m in seen
+            if m.get("tool_calls")] == [None, "做完\n了", "做完\n了"]
+
+
+def test_partial_strings_read_as_far_as_they_have_come():
+    assert partial_string('{"state": "rea', "state") == "rea"
+    assert partial_string('{"summary": "a\\"b\\u4e2', "summary") == 'a"b'
+    assert partial_string('{"summary": "a\\', "summary") == "a"
+    assert partial_string('{"state": "ready"}', "summary") is None
+
+
+class StreamingModel(ScriptedModel):
+    """A scripted model that also streams: each answer's arguments arrive a few characters at a time."""
+
+    async def stream(self, messages, tools=None, on_progress=None, **extra):
+        message = await self.complete(messages, tools)
+        if message.get("tool_calls") and on_progress:
+            raw = message["tool_calls"][0]["function"]["arguments"]
+            for end in range(1, len(raw) + 1, 3):
+                partial = json.loads(json.dumps(message))
+                partial["tool_calls"][0]["function"]["arguments"] = raw[:end]
+                on_progress(partial)
+        return message
+
+
+def test_a_desktop_conversation_shows_the_steps_and_the_answer_as_it_is_written(tmp_path):
+    router = ScriptedModel(call("decide", decision="accept", title="跑一下", scope="运行 echo", acknowledgement="好。",
+                                name="Run", reason="明确请求"))
+    worker = StreamingModel(
+        {"role": "assistant", "content": "我先跑一下。", "reasoning_content": "要用 shell",
+         "tool_calls": [{"id": "s1", "type": "function",
+                         "function": {"name": "shell", "arguments": json.dumps({"command": "echo hi"})}}]},
+        call("report", state="ready", summary="跑完了，输出是 hi。"))
+
+    async def main():
+        rt = agent_runtime(tmp_path, router, worker, sources={"app": {"kind": "app"}},
+                           policy={"sources": {"app": {"allowed": [{"id": "me"}]}}})
+        ctx = rt.sources["app"]
+        events = []
+        queue = ctx.kind.subscribe("me")
+        try:
+            rt.start()
+            ctx.kind.post(ctx, "me", "main", "跑一下 echo hi")
+            done = lambda: any(r["role"] == "reply" for r in ctx.kind.history(ctx, "me", "main"))  # noqa: E731
+            await drive(rt, done, timeout=15)
+            while not queue.empty():
+                events.append(queue.get_nowait())
+            return events, ctx.kind.steps(ctx, "me", "main"), rt.store.tickets.list()[0]
+        finally:
+            await rt.close()
+
+    events, steps, ticket = asyncio.run(main())
+    assert [(s["name"], s["status"]) for s in steps] == [("think", "done"), ("note", "done"), ("shell", "done")]
+    assert steps[2]["input"] == "echo hi" and "hi" in steps[2]["output"] and steps[2]["ticket_id"] == ticket.id
+    # The shell step was shown while it ran, then again when it ended.
+    assert [e["step"]["status"] for e in events if e["type"] == "step" and e["step"]["name"] == "shell"] == \
+        ["running", "done"]
+    written = [e["text"] for e in events if e["type"] == "stream"]
+    assert written and written[-1] == "跑完了，输出是 hi。" and all("跑完了，输出是 hi。".startswith(t) for t in written)
+    assert {e["thread"] for e in events if e["type"] in ("stream", "thinking", "idle")} == {"main"}
+    assert any(e["type"] == "thinking" for e in events) and events[-1]["type"] != "thinking"

@@ -157,6 +157,7 @@ form#setup-form label .i { color: var(--soft); }
 }
 .tab-sep { width: 1px; height: 16px; background: var(--line-2); }
 .badge { min-width: 18px; height: 18px; padding: 0 5px; background: var(--amber); color: #1d1103; font-family: var(--sans); font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; }
+.who .avatar.sm { margin-right: -2px; }
 .who { justify-self: end; display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; color: var(--dim); }
 .who .user { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -185,20 +186,57 @@ form#setup-form label .i { color: var(--soft); }
 .messages { list-style: none; margin: 0; padding: 16px 14px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
 .msg { display: grid; grid-template-columns: 30px minmax(0, 1fr) 30px; gap: 4px 10px; align-items: start; }
 .msg.arrived, .card.arrived { animation: incoming 0.3s ease-out both; }
-.avatar { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line-2); background: var(--panel-2); display: grid; place-items: center; color: var(--soft); }
-.avatar .i { width: 16px; height: 16px; }
-.avatar.ai { background: var(--mark) center / 20px auto no-repeat, var(--panel-2); }
+.avatar { width: 30px; height: 30px; border-radius: 50%; overflow: hidden; display: block; flex: none; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.avatar svg { display: block; width: 100%; height: 100%; }
+.avatar.sm { width: 20px; height: 20px; }
 .bubble { padding: 9px 13px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.65; }
 .msg .meta { font-family: var(--sans); font-size: 11px; color: var(--dim); letter-spacing: 0.06em; }
 .msg.user .avatar { grid-column: 3; grid-row: 1; }
 .msg.user .bubble { grid-column: 2; grid-row: 1; justify-self: end; max-width: 92%; background: #142a2e; border: 1px solid #24484d; }
 .msg.user .meta { grid-column: 2; justify-self: end; }
 .msg.reply .avatar, .msg.acknowledgement .avatar, .msg.notice .avatar { grid-column: 1; grid-row: 1; }
-.msg.reply .bubble, .msg.acknowledgement .bubble, .msg.notice .bubble { grid-column: 2; justify-self: start; max-width: 92%; background: var(--panel-2); border: 1px solid var(--line-2); }
+/* The assistant's words are not boxed: they sit on the page beside its avatar, the way a chat app writes them. */
+.msg.reply, .msg.acknowledgement, .msg.notice { grid-template-columns: 30px minmax(0, 1fr); }
+.msg.reply .bubble, .msg.acknowledgement .bubble, .msg.notice .bubble { grid-column: 2; justify-self: stretch; padding: 4px 0 0; background: none; border: 0; }
 .msg.acknowledgement .bubble { color: var(--soft); }
-.msg.reply .meta, .msg.acknowledgement .meta { grid-column: 2; justify-self: start; }
-/* A reply with structure (a list or a table) is shown as a result panel. */
-.msg.rich .bubble { white-space: normal; width: 100%; max-width: 100%; padding: 12px 14px; background: var(--panel); }
+.msg.reply .meta, .msg.acknowledgement .meta, .msg.notice .meta { grid-column: 2; justify-self: start; }
+.msg.reply .bubble { white-space: normal; }
+.msg.reply .bubble > p { white-space: pre-wrap; }
+/* The answer while it is being written, with a cursor at its end. */
+.msg.streaming .bubble > p:last-child::after, .msg.streaming .bubble > h4:last-child::after,
+.msg.streaming .bubble > ul:last-child > li:last-child::after, .msg.streaming .bubble > ol:last-child > li:last-child::after,
+.msg.streaming .bubble > table:last-child tr:last-child td:last-child::after { content: ""; display: inline-block; width: 7px; height: 1.05em; margin-left: 3px; vertical-align: -2px; background: var(--teal); animation: caret 0.9s steps(2) infinite; }
+@keyframes caret { 50% { opacity: 0; } }
+
+/* --- the worker's steps: one folding line per ticket, the steps inside --- */
+.work { margin-left: 40px; }
+.work-box > summary { list-style: none; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--dim); font-size: 12.5px; padding: 2px 0; user-select: none; }
+.work-box > summary::-webkit-details-marker, .step summary::-webkit-details-marker { display: none; }
+.work-box > summary:hover { color: var(--soft); }
+.work-box > summary .i { width: 13px; height: 13px; transition: transform 0.15s; }
+.work-box[open] > summary .i { transform: rotate(90deg); }
+.work.running .work-label { background: linear-gradient(90deg, var(--dim) 0%, #e6edf0 50%, var(--dim) 100%) 0 0 / 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 1.6s linear infinite; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+.work-spin { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--line-2); border-top-color: var(--teal); animation: spin 0.8s linear infinite; }
+.work-done { width: 6px; height: 6px; border-radius: 50%; background: var(--teal-line, #3aa9ac); }
+@keyframes spin { to { transform: rotate(360deg); } }
+.work-steps { list-style: none; margin: 6px 0 2px 5px; padding: 0 0 0 14px; border-left: 1px solid var(--line); display: grid; gap: 4px; }
+.step { font-size: 12.5px; color: var(--soft); }
+.step summary { list-style: none; display: flex; align-items: center; gap: 7px; cursor: pointer; padding: 3px 0; min-width: 0; }
+.step summary:hover .step-name { color: #e6edf0; }
+.step summary > .i { width: 14px; height: 14px; flex: none; color: var(--dim); }
+.step-name { flex: none; }
+.step-input { font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; color: var(--teal); background: #0b1416; border: 1px solid #1b2e31; padding: 1px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.step-state { margin-left: auto; flex: none; display: grid; place-items: center; width: 14px; height: 14px; }
+.step-state .i { width: 12px; height: 12px; color: var(--teal); }
+.step.running .step-state { border-radius: 50%; border: 1.5px solid var(--line-2); border-top-color: var(--teal); width: 10px; height: 10px; animation: spin 0.8s linear infinite; }
+.step.error .step-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+.step.error .step-name { color: var(--red); }
+.step-output { margin: 4px 0 6px; padding: 8px 10px; background: #070a0c; border: 1px solid var(--line); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; line-height: 1.55; color: var(--soft); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
+.step.think .step-output { font-family: inherit; font-size: 12.5px; color: var(--dim); background: none; border: 0; border-left: 2px solid var(--line-2); padding: 2px 0 2px 10px; }
+.step-output.waiting { color: var(--dim); }
+.step .note { margin: 2px 0; color: var(--soft); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.step.thinking { color: var(--dim); font-size: 12.5px; padding: 2px 0; }
 .bubble p { margin: 0 0 6px; } .bubble p:last-child { margin-bottom: 0; }
 .bubble h4 { margin: 0 0 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); font-size: 13.5px; display: flex; align-items: center; gap: 8px; }
 .bubble ul, .bubble ol { margin: 4px 0 6px; padding-left: 18px; }

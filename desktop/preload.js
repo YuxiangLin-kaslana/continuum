@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('continuum', {
   threads: call('api:threads'),
   history: call('api:history'),
   post: call('api:post'),
+  steps: call('api:steps'),
   tickets: call('api:tickets'),
   stop: call('api:stop'),
   retry: call('api:retry'),

@@ -46,6 +46,15 @@ def _browser():
     return sync_playwright
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_the_avatars_drawn_from_names():
+    import subprocess
+
+    result = subprocess.run(["node", "--test", str(DESKTOP / "test" / "avatar.test.js")], capture_output=True,
+                            text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.skipif(_browser() is None, reason="needs playwright")
 def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
     sync_playwright = _browser()
@@ -80,13 +89,32 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         assert page.inner_text("#thread-title") == "主对话" and page.inner_text("#thread-no") == "#001"
         assert page.inner_text("#badge") == "1"  # one ticket waits for an answer
 
-        # A message, then its acknowledgement and reply arrive on the stream.
+        # Avatars are drawn from the names: the person's and the assistant's.
+        assert page.locator(".msg.user .avatar svg").count() == 1 and page.locator(".msg.acknowledgement .avatar svg").count() == 1
+        assert page.locator("#me-avatar svg").count() == 1
+        # The steps a worker took are kept in the conversation, folded into one line.
+        assert "已执行 2 个步骤" in page.inner_text(".work")
+        page.click(".work summary")
+        assert "python3 compare.py quotes/" in page.inner_text(".work .step.shell")
+
+        # A message: its acknowledgement, the worker thinking and running a command as it happens, then the answer
+        # written as it comes, which gives way to the reply itself.
         page.fill("#input", "顺便核一下交期")
         page.press("#input", "Enter")
-        page.wait_for_selector(".msg.reply")
-        roles = [page.locator(".msg").nth(i).get_attribute("class").split()[1] for i in range(5)]
+        page.wait_for_selector(".work.running")
+        page.wait_for_selector(".work .step.shell.done >> text=ls /work")
+        page.wait_for_selector(".msg.streaming")
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-streaming.png")
+        page.wait_for_selector(".msg.reply:not(.streaming)")
+        assert page.locator(".msg.streaming").count() == 0 and page.locator(".work.running").count() == 0
+        roles = [c.split()[1] for c in page.locator(".msg").evaluate_all("ns => ns.map(n => n.className)")]
         assert roles == ["user", "acknowledgement", "user", "acknowledgement", "reply"]
-        assert page.input_value("#input") == ""
+        assert page.locator(".msg.reply li").count() == 2 and page.input_value("#input") == ""
+        # The assistant's words are not boxed; the person's are.
+        styles = page.evaluate("""() => ['.msg.reply .bubble', '.msg.user .bubble'].map(s => {
+            const c = getComputedStyle(document.querySelector(s)); return [c.borderTopWidth, c.backgroundColor]; })""")
+        assert styles[0] == ["0px", "rgba(0, 0, 0, 0)"] and styles[1][0] != "0px"
         if SHOTS:
             page.wait_for_timeout(400)
             page.screenshot(path=f"{SHOTS}/desktop-chat.png")
@@ -117,6 +145,6 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         # "去回答" goes to the conversation the question belongs to.
         page.locator(".card.person").get_by_role("button", name="去回答").click()
         page.wait_for_function("document.querySelector('#thread-title').textContent === '主对话'")
-        assert page.is_visible("#view-chat") and page.locator(".msg").count() == 5
+        assert page.is_visible("#view-chat") and page.locator(".msg").count() == 5 and page.locator(".work").count() == 2
         assert errors == []
         browser.close()

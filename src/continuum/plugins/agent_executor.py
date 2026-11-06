@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from continuum.core.errors import UserError
-from continuum.models import ChatModel, ModelError, tool, tool_calls
+from continuum.models import ChatModel, ModelError, partial_string, tool, tool_calls
 from continuum.plugin import ExecutorContext
 
 from . import sandbox
@@ -61,6 +63,10 @@ TOOLS = [
          {"trigger_id": {"type": "string"}, "reason": {"type": "string"}}),
 ]
 ENDS_TURN = {"ready", "blocked", "failed", "dropped"}
+# The tools whose work a person sees as steps of the turn; the rest are the worker's calls to the host, whose words
+# reach the person as messages.
+SHOWN = {"shell", "read_file", "write_file", "list_files"}
+SHOWN_OUTPUT = 4000
 
 
 class AgentConfig(BaseModel):
@@ -83,6 +89,47 @@ def _inside(workdir: Path, path: str) -> Path:
     if target != workdir.resolve() and workdir.resolve() not in target.parents:
         raise ValueError(f"{path} is outside /work")
     return target
+
+
+def _clip(text: str, limit: int = SHOWN_OUTPUT) -> str:
+    return text if len(text) <= limit else text[:limit] + "\n…"
+
+
+def _step_input(name: str, args: dict[str, Any]) -> str:
+    if "_invalid" in args:
+        return str(args["_invalid"])[:200]
+    if name == "shell":
+        return str(args.get("command", ""))
+    return str(args.get("path") or ".")
+
+
+class _Live:
+    """What a person sees while the model is still writing: the answer as it comes (the summary of a `ready` report,
+    or a question), at most every few tens of milliseconds."""
+
+    def __init__(self, job: Any, every: float = 0.05):
+        self.job = job
+        self.every = every
+        self.sent = ""
+        self.last = 0.0
+
+    def text(self, message: dict[str, Any]) -> str:
+        shown = ""
+        for call in message.get("tool_calls") or []:
+            name = call["function"]["name"]
+            raw = call["function"]["arguments"]
+            if name == "report" and partial_string(raw, "state") == "ready":
+                shown = partial_string(raw, "summary") or shown
+            elif name == "ask":
+                shown = partial_string(raw, "question") or shown
+        return shown
+
+    def __call__(self, message: dict[str, Any], final: bool = False) -> None:
+        text = self.text(message)
+        now = time.monotonic()
+        if text and text != self.sent and (final or now - self.last >= self.every):
+            self.sent, self.last = text, now
+            self.job.activity({"type": "stream", "text": text})
 
 
 def _describe(item: Any) -> str:
@@ -121,7 +168,15 @@ class AgentExecutor:
         await take_inputs()
         try:
             for _ in range(config.max_steps):
-                message = await model.complete(messages, tools=TOOLS, **config.extra)
+                job.activity({"type": "thinking"})
+                started = time.monotonic()
+                live = _Live(job)
+                if hasattr(model, "stream"):
+                    message = await model.stream(messages, tools=TOOLS, on_progress=live, **config.extra)
+                    live(message, final=True)
+                else:
+                    message = await model.complete(messages, tools=TOOLS, **config.extra)
+                self._show_words(job, message, time.monotonic() - started)
                 kept = {k: v for k, v in message.items() if k in ("role", "content", "tool_calls", "reasoning_content")}
                 kept["content"] = kept.get("content") or ""
                 messages.append(kept)
@@ -130,7 +185,7 @@ class AgentExecutor:
                     return  # it said something without acting: the turn ends, and the host reports it waiting
                 ended = False
                 for call_id, name, args in calls:
-                    result, ends = await self._call(job, config, name, args)
+                    result, ends = await self._shown_call(job, config, call_id, name, args)
                     messages.append({"role": "tool", "tool_call_id": call_id, "content": result})
                     ended = ended or ends
                 path.write_text(json.dumps(messages, ensure_ascii=False), encoding="utf-8")
@@ -141,7 +196,36 @@ class AgentExecutor:
         except ModelError as error:
             job.report("failed", f"模型调用失败：{error}")
         finally:
+            job.activity({"type": "idle"})
             path.write_text(json.dumps(messages, ensure_ascii=False), encoding="utf-8")
+
+    @staticmethod
+    def _show_words(job, message: dict[str, Any], seconds: float) -> None:
+        """The model's thinking and its words beside its tool calls are steps of the turn too."""
+        reasoning = (message.get("reasoning_content") or "").strip()
+        if reasoning:
+            job.activity({"type": "step", "key": uuid.uuid4().hex, "name": "think", "input": f"{seconds:.0f}",
+                          "output": _clip(reasoning), "status": "done"})
+        words = (message.get("content") or "").strip()
+        if words and message.get("tool_calls"):
+            job.activity({"type": "step", "key": uuid.uuid4().hex, "name": "note", "input": "",
+                          "output": _clip(words), "status": "done"})
+
+    async def _shown_call(self, job, config: AgentConfig, call_id: str, name: str,
+                          args: dict[str, Any]) -> tuple[str, bool]:
+        if name not in SHOWN:
+            return await self._call(job, config, name, args)
+        key = call_id or uuid.uuid4().hex
+        step = {"type": "step", "key": key, "name": name, "input": _step_input(name, args)}
+        job.activity({**step, "status": "running", "output": ""})
+        result, ends = await self._call(job, config, name, args)
+        failed = result.startswith(("错误：", "被拒绝：")) or (name == "shell" and not result.startswith("[exit code 0]"))
+        if name == "write_file" and not failed:
+            result_shown = _clip(str(args.get("content", "")))
+        else:
+            result_shown = _clip(result)
+        job.activity({**step, "status": "error" if failed else "done", "output": result_shown})
+        return result, ends
 
     async def _call(self, job, config: AgentConfig, name: str, args: dict[str, Any]) -> tuple[str, bool]:
         """Run one tool; returns what the model reads back, and whether the turn ends."""

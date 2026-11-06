@@ -175,6 +175,8 @@ handle('api:history', (thread, after) =>
   client.request('GET', `/api/v1/threads/${encodeURIComponent(thread)}/messages?after=${Number(after) || 0}`));
 handle('api:post', (thread, text) =>
   client.request('POST', `/api/v1/threads/${encodeURIComponent(thread)}/messages`, { text }));
+handle('api:steps', (thread) =>
+  client.request('GET', `/api/v1/threads/${encodeURIComponent(thread)}/steps`));
 handle('api:tickets', () => client.request('GET', '/api/v1/tickets'));
 handle('api:stop', (id) => client.request('POST', `/api/v1/tickets/${encodeURIComponent(id)}/stop`, {}));
 handle('api:retry', (id) => client.request('POST', `/api/v1/tickets/${encodeURIComponent(id)}/retry`));

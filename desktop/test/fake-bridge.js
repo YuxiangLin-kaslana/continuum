@@ -17,17 +17,31 @@
       updated_at: '2026-11-03T09:00:00Z' },
   ];
   const ok = (data) => Promise.resolve({ ok: true, data });
-  const add = (thread, role, text) => {
-    const row = { id: nextId++, user: 'me', thread, role, text, at: now() };
+  const add = (thread, role, text, ticket = null) => {
+    const row = { id: nextId++, user: 'me', thread, role, text, ticket_id: ticket, at: now() };
     messages.push(row);
     return row;
   };
+  const steps = [];
+  let nextStep = 1;
+  const step = (thread, ticket, key, name, input, status, output = '') => {
+    let row = steps.find((x) => x.ticket_id === ticket && x.key === key);
+    if (!row) {
+      row = { id: nextStep++, user: 'me', thread, ticket_id: ticket, key, name, input, at: now() };
+      steps.push(row);
+    }
+    Object.assign(row, { status, output, ended_at: status === 'running' ? null : now() });
+    return { ...row };
+  };
   add('main', 'user', '帮我核对一下 Laser Control Board 的供应商报价');
-  add('main', 'acknowledgement', '收到，开始处理：核对 Laser Control Board 的供应商报价');
+  add('main', 'acknowledgement', '收到，开始处理：核对 Laser Control Board 的供应商报价', 't-1');
+  step('main', 't-1', 'k1', 'think', '4', 'done', '先把三家的报价单读进来，按料号对齐，再比单价和封装。');
+  step('main', 't-1', 'k2', 'read_file', 'quotes/vendor_a.csv', 'done', 'part,package,price\nR12,0402,0.012\n…');
+  step('main', 't-1', 'k3', 'shell', 'python3 compare.py quotes/', 'done', '[exit code 0]\n4 differences found');
   add('bom', 'user', '列一下 R12 的两家报价');
   add('bom', 'reply', '#### R12 报价对比\n| 供应商 | 封装 | 单价 |\n|---|---|---|\n| 甲 | 0402 | **0.012** |\n| 乙 | 0603 | 0.010 |\n- 差价 12%\n- <b>未</b>含运费');
 
-  window.__fake = { fire, messages, tickets };
+  window.__fake = { fire, messages, tickets, steps };
   window.continuum = {
     getConfig: () => ok({ server: 'https://continuum.example.com', user: configured ? 'me' : '', configured,
       connection: configured ? 'online' : 'offline' }),
@@ -44,12 +58,29 @@
     history: (thread, after) => ok(messages.filter((m) => m.thread === thread && m.id > after)),
     post: (thread, text) => {
       const row = add(thread, 'user', text);
-      setTimeout(() => {
-        fire('event', { type: 'message', message: add(thread, 'acknowledgement', `收到，开始处理：${text}`) });
-        fire('event', { type: 'message', message: add(thread, 'reply', `已处理「${text}」`) });
-      }, 30);
+      // A turn as the server streams it: acknowledged, thinking, a command run, the answer written as it comes.
+      const ticket = `t-${row.id}`;
+      const answer = `已处理「${text}」\n- 交期变化 **2** 处\n- 已写入 \`/work/report.md\``;
+      const at = (ms, fn) => setTimeout(fn, ms);
+      const live = (event) => fire('event', { ...event, ticket_id: ticket, thread });
+      at(30, () => {
+        fire('event', { type: 'message', message: add(thread, 'acknowledgement', `收到，开始处理：${text}`, ticket) });
+        live({ type: 'thinking' });
+      });
+      at(120, () => fire('event', { type: 'step', step: step(thread, ticket, 'a', 'shell', 'ls /work', 'running') }));
+      at(260, () => fire('event', { type: 'step',
+        step: step(thread, ticket, 'a', 'shell', 'ls /work', 'done', '[exit code 0]\nbom.csv\nleadtimes.csv') }));
+      at(300, () => live({ type: 'thinking' }));
+      for (let n = 4, ms = 360; n <= answer.length; n += 4, ms += 25) {
+        at(ms, () => live({ type: 'stream', text: answer.slice(0, n) }));
+      }
+      at(380 + answer.length * 7, () => {
+        fire('event', { type: 'message', message: add(thread, 'reply', answer, ticket) });
+        live({ type: 'idle' });
+      });
       return ok(row);
     },
+    steps: (thread) => ok(steps.filter((x) => x.thread === thread).map((x) => ({ ...x }))),
     tickets: () => ok(tickets),
     stop: (id) => {
       const t = tickets.find((x) => x.id === id);

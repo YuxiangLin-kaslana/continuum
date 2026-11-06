@@ -7,6 +7,11 @@
   const state = {
     user: '', connection: 'offline', view: 'chat', thread: 'main',
     threads: [], messages: new Map(), tickets: new Map(), unread: new Set(),
+    // What the workers do, per conversation: their steps (kept by the server), and what is live only now: the
+    // answer being written and the model thinking, per ticket.
+    steps: new Map(), streams: new Map(), thinking: new Map(),
+    // Which step boxes a person opened or closed by hand.
+    open: new Map(),
     // What has been on screen already: only what is new plays its entrance.
     shown: new Set(),
   };
@@ -27,7 +32,32 @@
     calendar: '<rect x="3" y="5" width="18" height="16" rx="1"/><path d="M3 10h18M8 3v4M16 3v4"/>',
     tag: '<path d="M3 12V3h9l9 9-9 9z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
     check: '<path d="m5 12 5 5 9-10"/>',
+    shell: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="m7 9 3 3-3 3M12 15h5"/>',
+    read_file: '<path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h7"/>',
+    write_file: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13 7 4 4"/>',
+    list_files: '<path d="M3 6h6l2 2h10v11H3z"/>',
+    think: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18 16l.7 1.8 1.8.7-1.8.7L18 21l-.7-1.8-1.8-.7 1.8-.7z"/>',
+    chevron: '<path d="m9 6 6 6-6 6"/>',
   };
+
+  // --- avatars: a picture drawn from the name, for anyone who has none of their own ---
+
+  const ASSISTANT = 'continuum';
+  const pictures = new Map();
+  function picture(name, ai) {
+    const key = `${ai ? 8 : 4}:${name}`;
+    if (!pictures.has(key)) {
+      pictures.set(key, window.ContinuumAvatar
+        ? window.ContinuumAvatar.svg(name, ai ? { folds: 8, hues: [165, 285] } : { folds: 4 }) : '');
+    }
+    return pictures.get(key);
+  }
+  function avatar(name, ai, extra = '') {
+    const node = el('span', `avatar${ai ? ' ai' : ''}${extra}`);
+    node.setAttribute('aria-hidden', 'true');
+    node.innerHTML = picture(name, ai);
+    return node;
+  }
   function icon(name) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('class', 'i');
@@ -178,6 +208,9 @@
     state.tickets.clear();
     state.shown.clear();
     state.unread.clear();
+    state.steps.clear();
+    state.streams.clear();
+    state.thinking.clear();
     state.thread = 'main';
     showSetup();
   });
@@ -187,6 +220,7 @@
   async function showMain(user) {
     state.user = user;
     $('user').textContent = user;
+    $('me-avatar').innerHTML = picture(user, false);
     $('setup').hidden = true;
     $('main').hidden = false;
     await Promise.all([loadThreads(), loadTickets()]);
@@ -270,13 +304,14 @@
     const known = state.messages.get(thread) || [];
     const after = known.length ? known[known.length - 1].id : 0;
     try {
-      const rows = await call('history', thread, after);
+      const [rows, steps] = await Promise.all([call('history', thread, after), api.steps ? call('steps', thread) : []]);
       for (const row of rows) addMessage(row, false);
+      state.steps.set(thread, new Map(steps.map((step) => [`${step.ticket_id}:${step.key}`, step])));
     } catch (error) {
       showStatus(error.message);
     }
     if (!state.messages.has(thread)) state.messages.set(thread, []);
-    if (thread === state.thread) renderMessages();
+    if (thread === state.thread) renderMessages(true);
   }
 
   function addMessage(row, render = true) {
@@ -285,12 +320,14 @@
     list.push(row);
     list.sort((a, b) => a.id - b.id);
     state.messages.set(row.thread, list);
+    // The answer arrived: what was being written gives way to it.
+    if (row.ticket_id && row.role !== 'user' && row.role !== 'acknowledgement') state.streams.delete(row.ticket_id);
     if (!state.threads.some((t) => t.thread === row.thread)) {
       state.threads.unshift({ thread: row.thread });
       renderThreads();
     }
     if (row.thread !== state.thread) {
-      state.unread.add(row.thread);
+      if (row.role !== 'user') state.unread.add(row.thread);
       renderThreads();
     } else if (render) {
       renderMessages();
@@ -299,9 +336,8 @@
 
   function message(m) {
     const item = el('li', `msg ${m.role}`);
-    const avatar = el('span', m.role === 'user' ? 'avatar' : 'avatar ai');
-    avatar.setAttribute('aria-hidden', 'true');
-    if (m.role === 'user') avatar.append(icon('user'));
+    const mine = m.role === 'user';
+    const face = mine ? avatar(m.user || state.user, false) : avatar(ASSISTANT, true);
     const bubble = el('div', 'bubble');
     if (m.role === 'reply') {
       const { html, rich } = markdown(m.text);
@@ -310,16 +346,137 @@
     } else {
       bubble.textContent = m.text;
     }
-    item.append(avatar, bubble, el('div', 'meta', time(m.at)));
+    item.append(face, bubble, el('div', 'meta', time(m.at)));
     return arrival(item, `m:${m.id}`);
   }
 
-  function renderMessages() {
-    const list = state.messages.get(state.thread) || [];
+  // --- what the worker does: its steps, folded into one box per ticket, the way a chat app shows tool calls ---
+
+  const STEP_NAMES = { shell: '运行命令', read_file: '读取文件', write_file: '写入文件', list_files: '查看目录' };
+
+  function remember(details, key, fallback) {
+    details.open = state.open.has(key) ? state.open.get(key) : fallback;
+    details.addEventListener('toggle', () => state.open.set(key, details.open));
+    return details;
+  }
+
+  function stepItem(step) {
+    const item = el('li', `step ${step.name} ${step.status}`);
+    if (step.name === 'note') {
+      item.append(el('p', 'note', step.output));
+      return item;
+    }
+    const details = remember(el('details'), `s:${step.ticket_id}:${step.key}`, false);
+    const summary = el('summary');
+    summary.append(icon(STEP_NAMES[step.name] ? step.name : 'think'));
+    if (step.name === 'think') {
+      summary.append(el('span', 'step-name', `思考了 ${step.input || 1} 秒`));
+    } else {
+      summary.append(el('span', 'step-name', STEP_NAMES[step.name] || step.name), el('code', 'step-input', step.input));
+    }
+    const mark = el('span', 'step-state');
+    mark.title = { running: '进行中', done: '完成', error: '出错' }[step.status] || '';
+    if (step.status === 'done') mark.append(icon('check'));
+    summary.append(mark);
+    details.append(summary);
+    if (step.output) details.append(el(step.name === 'think' ? 'div' : 'pre', 'step-output', step.output));
+    else if (step.status === 'running') details.append(el('div', 'step-output waiting', '等待输出…'));
+    item.append(details);
+    return item;
+  }
+
+  function workBox(ticket, steps, thinking) {
+    const running = thinking || steps.some((s) => s.status === 'running');
+    const item = el('li', `work${running ? ' running' : ''}`);
+    item.dataset.ticket = ticket;
+    const details = remember(el('details', 'work-box'), `w:${ticket}`, running);
+    if (running) details.open = state.open.get(`w:${ticket}`) !== false;
+    const summary = el('summary');
+    const counted = steps.filter((s) => s.name !== 'note' && s.name !== 'think').length;
+    const current = [...steps].reverse().find((s) => s.status === 'running');
+    let label;
+    if (current) label = `正在${STEP_NAMES[current.name] || '处理'}…`;
+    else if (thinking) label = '思考中…';
+    else label = counted ? `已执行 ${counted} 个步骤` : '已思考';
+    summary.append(el('span', running ? 'work-spin' : 'work-done'), el('span', 'work-label', label), icon('chevron'));
+    details.append(summary);
+    const list = el('ol', 'work-steps');
+    list.append(...steps.map(stepItem));
+    if (thinking && !current) list.append(el('li', 'step thinking', '思考中…'));
+    details.append(list);
+    item.append(details);
+    return arrival(item, `w:${ticket}`);
+  }
+
+  function streamItem(ticket, text) {
+    const item = el('li', 'msg reply streaming');
+    item.id = `stream-${ticket}`;
+    const bubble = el('div', 'bubble');
+    const { html, rich } = markdown(text);
+    bubble.innerHTML = html;
+    if (rich) item.classList.add('rich');
+    item.append(avatar(ASSISTANT, true), bubble);
+    return item;
+  }
+
+  function renderMessages(toBottom = false) {
     const box = $('messages');
-    box.replaceChildren(...list.map(message));
-    $('empty-chat').hidden = list.length > 0;
-    box.scrollTop = box.scrollHeight;
+    const near = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+    const list = state.messages.get(state.thread) || [];
+    const steps = [...(state.steps.get(state.thread) || new Map()).values()];
+    // Messages and steps in the order they happened; the steps of one ticket in a row share a box.
+    const timeline = [...list.map((m) => ({ at: m.at, m })), ...steps.map((s) => ({ at: s.at, s }))]
+      .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+    const nodes = [];
+    const thinkingHere = new Set([...state.thinking].filter(([, thread]) => thread === state.thread).map(([t]) => t));
+    let run = null;
+    const flush = () => {
+      if (!run) return;
+      nodes.push(workBox(run.ticket, run.steps, thinkingHere.has(run.ticket) && run.last));
+      run = null;
+    };
+    timeline.forEach((entry, index) => {
+      if (entry.m) {
+        flush();
+        nodes.push(message(entry.m));
+        return;
+      }
+      if (!run || run.ticket !== entry.s.ticket_id) {
+        flush();
+        run = { ticket: entry.s.ticket_id, steps: [] };
+      }
+      run.steps.push(entry.s);
+      run.last = !timeline.slice(index + 1).some((e) => (e.m ? e.m.ticket_id : e.s.ticket_id) === run.ticket);
+    });
+    flush();
+    // A ticket thinking with no step of its own after its last message yet gets a box of its own at the end.
+    for (const ticket of thinkingHere) {
+      if (!nodes.some((n) => n.classList.contains('running') && n.dataset.ticket === ticket)) {
+        nodes.push(workBox(ticket, [], true));
+      }
+    }
+    for (const [ticket, live] of state.streams) {
+      if (live.thread === state.thread) nodes.push(streamItem(ticket, live.text));
+    }
+    box.replaceChildren(...nodes);
+    $('empty-chat').hidden = nodes.length > 0;
+    if (toBottom || near) box.scrollTop = box.scrollHeight;
+  }
+
+  // The answer as it is written: only its bubble changes, so the rest of the conversation stays as it is.
+  function updateStream(ticket) {
+    const live = state.streams.get(ticket);
+    const node = document.getElementById(`stream-${ticket}`);
+    if (!live || !node || live.thread !== state.thread) {
+      if (live && live.thread === state.thread) renderMessages();
+      return;
+    }
+    const box = $('messages');
+    const near = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+    const { html, rich } = markdown(live.text);
+    node.querySelector('.bubble').innerHTML = html;
+    node.classList.toggle('rich', rich);
+    if (near) box.scrollTop = box.scrollHeight;
   }
 
   $('composer').addEventListener('submit', async (event) => {
@@ -466,11 +623,34 @@
 
   // --- live events ---
 
+  const lingering = new Map();
   api.onEvent((event) => {
     if (event.type === 'message') addMessage(event.message);
     else if (event.type === 'ticket') {
       state.tickets.set(event.ticket.id, event.ticket);
       renderTickets();
+      if (event.ticket.stage !== 'working' && state.thinking.delete(event.ticket.id)) renderMessages();
+    } else if (event.type === 'step') {
+      const step = event.step;
+      if (!state.steps.has(step.thread)) state.steps.set(step.thread, new Map());
+      state.steps.get(step.thread).set(`${step.ticket_id}:${step.key}`, step);
+      if (step.thread === state.thread) renderMessages();
+    } else if (event.type === 'thinking') {
+      state.thinking.set(event.ticket_id, event.thread);
+      if (event.thread === state.thread) renderMessages();
+    } else if (event.type === 'idle') {
+      state.thinking.delete(event.ticket_id);
+      // An answer that was being written but never arrived as a message (the turn ended some other way) goes too.
+      clearTimeout(lingering.get(event.ticket_id));
+      lingering.set(event.ticket_id, setTimeout(() => {
+        if (state.streams.delete(event.ticket_id)) renderMessages();
+      }, 15000));
+      if (event.thread === state.thread) renderMessages();
+    } else if (event.type === 'stream') {
+      const fresh = !state.streams.has(event.ticket_id);
+      state.streams.set(event.ticket_id, { thread: event.thread, text: event.text });
+      if (fresh) state.thinking.delete(event.ticket_id);
+      if (event.thread === state.thread) (fresh ? renderMessages() : updateStream(event.ticket_id));
     }
   });
 
