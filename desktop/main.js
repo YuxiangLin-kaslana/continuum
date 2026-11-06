@@ -65,14 +65,14 @@ function trayIcon() {
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 440,
-    height: 720,
-    minWidth: 360,
-    minHeight: 480,
+    width: 520,
+    height: 780,
+    minWidth: 480,
+    minHeight: 560,
     show: false,
     title: 'Continuum',
     icon: icon(),
-    backgroundColor: '#0c121a',
+    backgroundColor: '#000000',
     // The window draws its own title bar (renderer/index.html .titlebar).
     frame: false,
     autoHideMenuBar: true,
@@ -181,6 +181,7 @@ handle('api:retry', (id) => client.request('POST', `/api/v1/tickets/${encodeURIC
 
 ipcMain.on('window:minimize', () => win && win.minimize());
 ipcMain.on('window:hide', () => win && win.hide());
+ipcMain.on('window:maximize', () => win && (win.isMaximized() ? win.unmaximize() : win.maximize()));
 
 // --- lifecycle ----------------------------------------------------------------------------------------------------
 

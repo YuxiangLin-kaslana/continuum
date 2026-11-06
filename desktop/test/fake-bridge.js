@@ -24,6 +24,8 @@
   };
   add('main', 'user', '帮我核对一下 Laser Control Board 的供应商报价');
   add('main', 'acknowledgement', '收到，开始处理：核对 Laser Control Board 的供应商报价');
+  add('bom', 'user', '列一下 R12 的两家报价');
+  add('bom', 'reply', '#### R12 报价对比\n| 供应商 | 封装 | 单价 |\n|---|---|---|\n| 甲 | 0402 | **0.012** |\n| 乙 | 0603 | 0.010 |\n- 差价 12%\n- <b>未</b>含运费');
 
   window.__fake = { fire, messages, tickets };
   window.continuum = {
@@ -38,7 +40,7 @@
       return ok({ user: 'me' });
     },
     logout: () => { configured = false; return ok(true); },
-    threads: () => ok([{ thread: 'main', last_id: nextId - 1 }]),
+    threads: () => ok([...new Set(messages.map((m) => m.thread).reverse())].map((thread) => ({ thread }))),
     history: (thread, after) => ok(messages.filter((m) => m.thread === thread && m.id > after)),
     post: (thread, text) => {
       const row = add(thread, 'user', text);
@@ -57,6 +59,7 @@
     retry: (id) => ok(tickets.find((x) => x.id === id)),
     minimize: () => {},
     hide: () => {},
+    maximize: () => {},
     onEvent: (fn) => listeners.event.push(fn),
     onState: (fn) => listeners.state.push(fn),
   };

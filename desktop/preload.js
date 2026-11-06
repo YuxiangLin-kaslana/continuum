@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('continuum', {
   retry: call('api:retry'),
   minimize: () => ipcRenderer.send('window:minimize'),
   hide: () => ipcRenderer.send('window:hide'),
+  maximize: () => ipcRenderer.send('window:maximize'),
   onEvent: (fn) => ipcRenderer.on('event', (_e, event) => fn(event)),
   onState: (fn) => ipcRenderer.on('state', (_e, state) => fn(state)),
 });
