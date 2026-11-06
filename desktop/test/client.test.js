@@ -22,6 +22,18 @@ test('checks a token before it is saved', async () => {
   await assert.rejects(Client.verify(fetch, 'http://127.0.0.1:9', token), (error) => error.status === 0);
 });
 
+test('logs in with a password, gets a token of its own, and gives it back on logout', async () => {
+  await assert.rejects(Client.login(fetch, server, 'me', 'wrong password', 'test'), (error) => error.status === 401);
+  const session = await Client.login(fetch, server, 'me', process.env.CONTINUUM_PASSWORD, 'test device');
+  assert.equal(session.user, 'me');
+  assert.notEqual(session.token, token);
+  assert.equal((await Client.verify(fetch, server, session.token)).user, 'me');
+  const client = new Client({ fetch, onEvent() {}, onState() {} });
+  client.configure(server, session.token);
+  await client.logout();
+  await assert.rejects(Client.verify(fetch, server, session.token), (error) => error.status === 401);
+});
+
 test('sends a message and hears the acknowledgement, the reply and the ticket on the stream', async () => {
   const events = [];
   const states = [];

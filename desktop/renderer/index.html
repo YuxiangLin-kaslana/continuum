@@ -563,16 +563,21 @@ l-33 -150 -4 -901 -3 -902 25 -28 24 -29 291 0 c277 0 291 1 310 20 20 20 20
 </g></svg>
           <div class="wm-sub">TACTICAL ASSISTANT</div>
         </div>
-        <p class="hud-label" aria-hidden="true">ESTABLISH UPLINK</p>
-        <h1 class="setup-title">连接到 Continuum 服务器</h1>
-        <p class="lead">令牌由管理员在服务器上用 <code>continuum user add</code> 生成，只显示一次。</p>
+        <p class="hud-label" aria-hidden="true">PILOT SIGN-IN</p>
+        <h1 class="setup-title">登录 Continuum</h1>
+        <p class="lead">用你的 Continuum 账号登录。</p>
         <form id="setup-form">
-          <label for="server">服务器地址 <span class="en" aria-hidden="true">UPLINK</span></label>
-          <input id="server" name="server" type="url" placeholder="https://continuum.example.com" required autocomplete="url" spellcheck="false">
-          <label for="token">令牌 <span class="en" aria-hidden="true">AUTH CODE</span></label>
-          <input id="token" name="token" type="password" placeholder="ctm_…" required autocomplete="off" spellcheck="false">
+          <label for="username">用户名 <span class="en" aria-hidden="true">CALLSIGN</span></label>
+          <input id="username" name="username" type="text" required autocomplete="username" spellcheck="false" autocapitalize="off">
+          <label for="password">密码 <span class="en" aria-hidden="true">PASSCODE</span></label>
+          <input id="password" name="password" type="password" required autocomplete="current-password">
+          <details class="server">
+            <summary>更换服务器 <span id="server-shown" class="server-shown"></span></summary>
+            <label for="server">服务器地址 <span class="en" aria-hidden="true">UPLINK</span></label>
+            <input id="server" name="server" type="url" placeholder="https://ai-api.yuxianglin.xyz" autocomplete="url" spellcheck="false">
+          </details>
           <p id="setup-error" class="error" role="alert" hidden></p>
-          <button id="connect" type="submit" class="primary">连接 <span class="en" aria-hidden="true">ENGAGE</span></button>
+          <button id="connect" type="submit" class="primary">登录 <span class="en" aria-hidden="true">ENGAGE</span></button>
         </form>
       </div>
     </section>

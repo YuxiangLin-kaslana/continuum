@@ -132,6 +132,15 @@ code { font-family: var(--sans); font-size: 12px; color: var(--soft); letter-spa
 form#setup-form { display: grid; gap: 6px; }
 label { font-size: 12px; color: var(--dim); margin-top: 8px; display: flex; justify-content: space-between; align-items: baseline; }
 #connect { margin-top: 16px; width: 100%; }
+.server { margin-top: 10px; }
+.server summary { cursor: pointer; color: var(--dim); font-size: 12px; list-style: none; display: flex; gap: 10px; align-items: baseline; }
+.server summary::-webkit-details-marker { display: none; }
+.server summary::before { content: "+"; color: var(--faint); }
+.server[open] summary::before { content: "−"; }
+.server summary:hover { color: var(--ink); }
+.server-shown { color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.server[open] .server-shown { display: none; }
+.server input { width: 100%; margin-top: 4px; }
 .error { color: var(--red); margin: 4px 0 0; font-size: 13px; }
 
 /* --- main --- */

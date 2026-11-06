@@ -61,6 +61,23 @@ class Client {
     return client.request('GET', '/api/v1/me');
   }
 
+  // Log in with a user name and password: the server answers with a token of this device's own.
+  static async login(fetch, server, username, password, device) {
+    const client = new Client({ fetch, onEvent() {}, onState() {} });
+    client.configure(server, 'login');
+    return client.request('POST', '/api/v1/login', { username, password, device });
+  }
+
+  // Tell the server this device's token is no longer wanted; a failure here does not keep anyone logged in.
+  async logout() {
+    try {
+      await this.request('POST', '/api/v1/logout', {});
+    } catch {
+      /* offline or already revoked */
+    }
+    this.disconnect();
+  }
+
   connect() {
     this.closed = false;
     this.open();

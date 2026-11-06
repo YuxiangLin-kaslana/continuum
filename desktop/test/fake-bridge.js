@@ -29,8 +29,10 @@
   window.continuum = {
     getConfig: () => ok({ server: 'https://continuum.example.com', user: configured ? 'me' : '', configured,
       connection: configured ? 'online' : 'offline' }),
-    saveConfig: ({ token }) => {
-      if (token !== 'ctm_good') return Promise.resolve({ ok: false, error: 'a valid bearer token is required', status: 401 });
+    saveConfig: ({ username, password }) => {
+      if (username !== 'me' || password !== 'good-password') {
+        return Promise.resolve({ ok: false, error: '用户名或密码不对', status: 401 });
+      }
       configured = true;
       setTimeout(() => fire('state', 'online'), 10);
       return ok({ user: 'me' });

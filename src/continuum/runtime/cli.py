@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import getpass
 import logging
 import signal
 import sys
@@ -128,6 +129,20 @@ def cmd_user(args: argparse.Namespace) -> int:
             print(token)
             print(f"To let {args.name} ask for work, list them under [policy.sources.app].allowed in "
                   f"{settings_path(home)}.")
+        elif args.action == "passwd":
+            if args.password_stdin:
+                password = sys.stdin.readline().rstrip("\n")
+            else:
+                password = getpass.getpass(f"New password for {args.name}: ")
+                if getpass.getpass("Again: ") != password:
+                    print("The two passwords differ; nothing changed.", file=sys.stderr)
+                    return 1
+            try:
+                accounts.set_password(args.name, password)
+            except ValueError as error:
+                print(f"continuum: {error}", file=sys.stderr)
+                return 1
+            print(f"Password set for {args.name}. The desktop app logs in with it.")
         elif args.action == "list":
             for row in accounts.list():
                 state = "revoked" if row["revoked"] else "active"
@@ -159,15 +174,16 @@ def main(argv: list[str] | None = None) -> int:
     log.add_argument("--source", default="cli")
     log.set_defaults(run=cmd_log)
     user = sub.add_parser("user", help="manage API users and their tokens")
-    user.add_argument("action", choices=["add", "list", "revoke"])
+    user.add_argument("action", choices=["add", "passwd", "list", "revoke"])
     user.add_argument("name", nargs="?")
     user.add_argument("--device", help="a label for the device the token is for")
+    user.add_argument("--password-stdin", action="store_true", help="passwd: read the password from standard input")
     user.set_defaults(run=cmd_user)
     status = sub.add_parser("status", help="print tickets and problems")
     status.add_argument("--limit", type=int, default=10)
     status.set_defaults(run=cmd_status)
     args = parser.parse_args(argv)
-    if getattr(args, "action", None) in ("add", "revoke") and not args.name:
+    if getattr(args, "action", None) in ("add", "passwd", "revoke") and not args.name:
         parser.error(f"user {args.action} needs a name")
     with contextlib.suppress(KeyboardInterrupt):
         return args.run(args)

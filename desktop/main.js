@@ -6,7 +6,11 @@ const { app, BrowserWindow, Tray, Menu, Notification, globalShortcut, ipcMain, n
 const { Client } = require('./lib/client');
 const configStore = require('./lib/config');
 
+const os = require('os');
+
 const SMOKE = process.argv.includes('--smoke');
+// The server this build talks to unless the person changes it on the login screen.
+const DEFAULT_SERVER = 'https://ai-api.yuxianglin.xyz';
 const SHORTCUT = 'CommandOrControl+Shift+Space';
 let win = null;
 let tray = null;
@@ -148,16 +152,19 @@ function handle(channel, fn) {
 
 handle('config:get', () => {
   const saved = config.load();
-  return { server: saved.server, user: saved.user, configured: !!(saved.server && saved.token), connection };
+  return { server: saved.server || DEFAULT_SERVER, user: saved.user, configured: !!(saved.server && saved.token),
+    connection };
 });
-handle('config:save', async ({ server, token }) => {
-  const me = await Client.verify((url, options) => net.fetch(url, options), server, token);
-  config.save({ server: server.trim().replace(/\/+$/, ''), user: me.user, token });
+handle('config:save', async ({ server, username, password }) => {
+  const address = (server || DEFAULT_SERVER).trim().replace(/\/+$/, '');
+  const device = `${os.hostname()} (${process.platform})`;
+  const session = await Client.login((url, options) => net.fetch(url, options), address, username, password, device);
+  config.save({ server: address, user: session.user, token: session.token });
   connect();
-  return { user: me.user };
+  return { user: session.user };
 });
-handle('config:logout', () => {
-  client.disconnect();
+handle('config:logout', async () => {
+  await client.logout();
   config.clear();
   connection = 'offline';
   updateTray();

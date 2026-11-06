@@ -72,9 +72,10 @@
     $('main').hidden = true;
     $('setup').hidden = false;
     $('server').value = server || $('server').value;
+    $('server-shown').textContent = $('server').value.replace(/^https?:\/\//, '');
     $('setup-error').hidden = !error;
     $('setup-error').textContent = error || '';
-    ($('server').value ? $('token') : $('server')).focus();
+    ($('username').value ? $('password') : $('username')).focus();
   }
 
   $('setup-form').addEventListener('submit', async (event) => {
@@ -82,11 +83,14 @@
     $('connect').disabled = true;
     $('setup-error').hidden = true;
     try {
-      const saved = await call('saveConfig', { server: $('server').value, token: $('token').value.trim() });
-      $('token').value = '';
+      const saved = await call('saveConfig', {
+        server: $('server').value.trim(), username: $('username').value.trim(), password: $('password').value,
+      });
+      $('password').value = '';
       await showMain(saved.user);
     } catch (error) {
-      $('setup-error').textContent = error.status === 401 ? '令牌无效或已被收回。' : error.message;
+      $('setup-error').textContent = error.status === 401 ? '用户名或密码不对。' : error.message;
+      $('password').select();
       $('setup-error').hidden = false;
     } finally {
       $('connect').disabled = false;
@@ -362,7 +366,7 @@
     $('link-text').textContent = LINK[connection] || connection.toUpperCase();
     $('dot').title = { online: '已连接', connecting: '连接中', offline: '未连接', unauthorized: '登录已失效' }[connection] || connection;
     if (connection === 'unauthorized') {
-      showSetup('', '登录已失效，请重新输入令牌。');
+      showSetup('', '登录已失效，请重新登录。');
       return;
     }
     showStatus(connection === 'offline' ? '和服务器断开了，正在重连…' : '');

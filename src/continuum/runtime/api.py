@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from typing import TYPE_CHECKING, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from continuum.core.errors import UserError
@@ -25,6 +26,38 @@ THREAD = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 class PostMessage(BaseModel):
     text: str = Field(min_length=1, max_length=20000)
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=200)
+    device: str = Field(default="", max_length=80)
+
+
+class Throttle:
+    """Failed logins per user and per client address: after `limit` failures in `window` seconds, refuse for the
+    rest of the window. Kept in memory; a restart clears it."""
+
+    def __init__(self, limit: int = 5, window: float = 600.0):
+        self.limit = limit
+        self.window = window
+        self.failures: dict[str, list[float]] = {}
+
+    def _recent(self, key: str, now: float) -> list[float]:
+        recent = [t for t in self.failures.get(key, []) if now - t < self.window]
+        self.failures[key] = recent
+        return recent
+
+    def blocked(self, keys: list[str], now: float) -> bool:
+        return any(len(self._recent(k, now)) >= self.limit for k in keys)
+
+    def failed(self, keys: list[str], now: float) -> None:
+        for k in keys:
+            self._recent(k, now).append(now)
+
+    def succeeded(self, keys: list[str]) -> None:
+        for k in keys:
+            self.failures.pop(k, None)
 
 
 class StopRequest(BaseModel):
@@ -84,9 +117,32 @@ def create_app(rt: Runtime) -> FastAPI:
     def refused(error: UserError) -> HTTPException:
         return HTTPException(404 if error.missing else 409, {"code": error.code, "message": str(error)})
 
+    throttle = Throttle()
+
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
         return {"ok": True}
+
+    @app.post("/api/v1/login")
+    async def login(body: LoginRequest, request: Request) -> dict[str, Any]:
+        # Behind a proxy the client's address is the first hop it names.
+        forwarded = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for", "")
+        address = forwarded.split(",")[0].strip() or (request.client.host if request.client else "")
+        keys = [f"user:{body.username.lower()}", f"ip:{address}"]
+        now = time.monotonic()
+        if throttle.blocked(keys, now):
+            raise HTTPException(429, "登录失败次数太多，请过十分钟再试")
+        token = rt.accounts.login(body.username, body.password, body.device)
+        if token is None:
+            throttle.failed(keys, now)
+            raise HTTPException(401, "用户名或密码不对")
+        throttle.succeeded(keys)
+        return {"user": body.username, "token": token}
+
+    @app.post("/api/v1/logout")
+    async def logout(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        token = authorization[7:] if authorization and authorization.lower().startswith("bearer ") else ""
+        return {"revoked": bool(token) and rt.accounts.revoke_token(token)}
 
     @app.get("/api/v1/me")
     async def me(user: str = Depends(user_of)) -> dict[str, Any]:

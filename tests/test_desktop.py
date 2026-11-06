@@ -21,9 +21,11 @@ def test_the_desktop_api_client_against_a_real_server(tmp_path):
     async def main():
         rt = app_runtime(tmp_path)
         token = rt.accounts.add("me", "test")
+        rt.accounts.set_password("me", "correct horse")
         port, runner = await serve(rt)
         try:
-            env = {**os.environ, "CONTINUUM_URL": f"http://127.0.0.1:{port}", "CONTINUUM_TOKEN": token}
+            env = {**os.environ, "CONTINUUM_URL": f"http://127.0.0.1:{port}", "CONTINUUM_TOKEN": token,
+                   "CONTINUUM_PASSWORD": "correct horse"}
             node = await asyncio.create_subprocess_exec(
                 "node", "--test", str(DESKTOP / "test" / "client.test.js"), env=env,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
@@ -56,15 +58,17 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         page.goto((DESKTOP / "renderer" / "index.html").as_uri())
         page.wait_for_selector("#app[data-ready]")
 
-        # First run: connect.
+        # First run: log in. The server address is filled in and folded away.
         assert page.is_visible("#setup") and page.input_value("#server") == "https://continuum.example.com"
+        assert not page.is_visible("#server") and "continuum.example.com" in page.inner_text(".server summary")
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-setup.png")
-        page.fill("#token", "ctm_wrong")
+        page.fill("#username", "me")
+        page.fill("#password", "wrong-password")
         page.click("#connect")
         page.wait_for_selector("#setup-error:not([hidden])")
-        assert "令牌无效" in page.inner_text("#setup-error")
-        page.fill("#token", "ctm_good")
+        assert "用户名或密码不对" in page.inner_text("#setup-error")
+        page.fill("#password", "good-password")
         page.click("#connect")
         page.wait_for_selector("#main:not([hidden])")
         assert page.inner_text("#user") == "me"

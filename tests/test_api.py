@@ -4,6 +4,7 @@ import asyncio
 import json
 
 import httpx
+import pytest
 import websockets
 
 from continuum.plugin import Plugin
@@ -108,6 +109,68 @@ def test_users_see_only_their_own_conversations_and_tickets_and_can_stop_them(tm
             await rt.close()
 
     asyncio.run(main())
+
+
+def test_a_password_login_gives_the_device_its_own_token_and_too_many_failures_lock_it(tmp_path):
+    async def main():
+        rt = app_runtime(tmp_path)
+        rt.accounts.set_password("me", "correct horse")
+        port, runner = await serve(rt)
+        try:
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client:
+                ok = await client.post("/api/v1/login", json={"username": "me", "password": "correct horse",
+                                                               "device": "laptop"})
+                assert ok.status_code == 200
+                token = ok.json()["token"]
+                auth = {"Authorization": f"Bearer {token}"}
+                assert (await client.get("/api/v1/me", headers=auth)).json()["user"] == "me"
+                assert [d["device"] for d in rt.accounts.list()] == ["laptop"]
+                # Wrong passwords and unknown users look the same.
+                wrong = await client.post("/api/v1/login", json={"username": "me", "password": "nope"})
+                ghost = await client.post("/api/v1/login", json={"username": "ghost", "password": "nope"})
+                assert wrong.status_code == ghost.status_code == 401 and wrong.json() == ghost.json()
+                for _ in range(4):
+                    await client.post("/api/v1/login", json={"username": "me", "password": "nope"})
+                locked = await client.post("/api/v1/login", json={"username": "me", "password": "correct horse"})
+                assert locked.status_code == 429
+                # Logging out gives the token back.
+                assert (await client.post("/api/v1/logout", headers=auth)).json() == {"revoked": True}
+                assert (await client.get("/api/v1/me", headers=auth)).status_code == 401
+        finally:
+            runner.cancel()
+            await rt.close()
+
+    asyncio.run(main())
+
+
+def test_passwords_are_stored_as_salted_hashes_and_checked(tmp_path):
+    from continuum.runtime.accounts import Accounts
+    from continuum.runtime.store import SQLiteStore
+
+    store = SQLiteStore(tmp_path / "c.db")
+    accounts = Accounts(store)
+    accounts.set_password("me", "correct horse")
+    accounts.set_password("you", "correct horse")
+    stored = [row[0] for row in store.db.execute("SELECT hash FROM passwords ORDER BY user")]
+    assert all(h.startswith("scrypt$") and "correct horse" not in h for h in stored) and stored[0] != stored[1]
+    assert accounts.check_password("me", "correct horse") and not accounts.check_password("me", "Correct horse")
+    with pytest.raises(ValueError):
+        accounts.set_password("me", "short")
+    store.close()
+
+
+def test_the_passwd_command_sets_a_password(tmp_path, monkeypatch):
+    import io
+
+    from continuum.runtime.accounts import Accounts
+    from continuum.runtime.cli import main
+    from continuum.runtime.store import SQLiteStore
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("a long enough password\n"))
+    assert main(["--home", str(tmp_path), "user", "passwd", "me", "--password-stdin"]) == 0
+    store = SQLiteStore(tmp_path / "continuum.db")
+    assert Accounts(store).check_password("me", "a long enough password")
+    store.close()
 
 
 def test_a_revoked_token_no_longer_works(tmp_path):
