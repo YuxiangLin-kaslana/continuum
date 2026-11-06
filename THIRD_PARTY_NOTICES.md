@@ -29,5 +29,5 @@ SOFTWARE.
 
 ## Fonts
 
-`desktop/renderer/fonts/` bundles Rajdhani (Indian Type Foundry) and Share Tech Mono (Carrois Type Design), both under
+`desktop/renderer/fonts/` bundles Cinzel (The Cinzel Project Authors) and Jost (The Jost Project Authors), both under
 the SIL Open Font License 1.1; their license texts are in that directory.

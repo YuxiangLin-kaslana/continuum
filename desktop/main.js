@@ -54,6 +54,11 @@ function icon() {
   return nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.png'));
 }
 
+// The tray gets its own small renders (tray.png and tray@2x.png), which stay sharp at 16 and 32 pixels.
+function trayIcon() {
+  return nativeImage.createFromPath(path.join(__dirname, 'assets', 'tray.png'));
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 440,
@@ -63,7 +68,7 @@ function createWindow() {
     show: false,
     title: 'Continuum',
     icon: icon(),
-    backgroundColor: '#060d15',
+    backgroundColor: '#0c121a',
     // The window draws its own title bar (renderer/index.html .titlebar).
     frame: false,
     autoHideMenuBar: true,
@@ -190,7 +195,7 @@ app.whenReady().then(() => {
     });
     return;
   }
-  tray = new Tray(icon());
+  tray = new Tray(trayIcon());
   tray.on('click', toggle);
   updateTray();
   globalShortcut.register(SHORTCUT, toggle);

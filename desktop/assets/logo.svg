@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Continuum">
+  <!-- Continuum: a crescent moon (a C, and a phase that keeps turning) rising in a dusk sky at altitude, over a long
+       horizon line. Indigo overhead, violet and rose lower, an amber horizon; the dark side shows by earthshine. -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#0c0f2a"/>
+      <stop offset="0.38" stop-color="#1f1a4d"/>
+      <stop offset="0.62" stop-color="#4a2a78"/>
+      <stop offset="0.80" stop-color="#b14f78"/>
+      <stop offset="0.93" stop-color="#f3a35e"/>
+      <stop offset="1" stop-color="#ffd08e"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.47" cy="0.42" r="0.42">
+      <stop offset="0.55" stop-color="#ffe7c2" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ffe7c2" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="lit" x1="0.1" y1="0.1" x2="0.8" y2="0.9">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.55" stop-color="#ffeccb"/>
+      <stop offset="1" stop-color="#ffbf73"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9ec6ff" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#b98cff" stop-opacity="0.15"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.18" stop-color="#ffffff"/>
+      <stop offset="0.82" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="crescent">
+      <rect width="256" height="256" fill="black"/>
+      <circle cx="122" cy="108" r="68" fill="white"/>
+      <circle cx="151" cy="93" r="60" fill="black"/>
+    </mask>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="256" height="256" rx="44" fill="url(#sky)"/>
+  <circle cx="122" cy="108" r="104" fill="url(#halo)"/>
+  <!-- earthshine on the dark side -->
+  <circle cx="122" cy="108" r="68" fill="#1b1840" fill-opacity="0.45" stroke="url(#rim)" stroke-width="2.5"/>
+  <!-- the crescent, lit warm -->
+  <g filter="url(#glow)">
+    <rect width="256" height="256" fill="url(#lit)" mask="url(#crescent)"/>
+  </g>
+  <!-- the horizon -->
+  <rect x="14" y="206" width="228" height="5" fill="url(#line)"/>
+  <!-- stars -->
+  <circle cx="198" cy="52" r="3.6" fill="#ffffff"/>
+  <circle cx="214" cy="92" r="1.8" fill="#ffffff" opacity="0.7"/>
+  <circle cx="44" cy="46" r="1.8" fill="#ffffff" opacity="0.6"/>
+  <rect x="2" y="2" width="252" height="252" rx="42" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="2"/>
+</svg>

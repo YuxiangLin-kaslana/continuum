@@ -201,7 +201,7 @@
     box.replaceChildren(...list.map((m) => {
       const item = el('li', `msg ${m.role}`);
       if (m.role === 'user' || m.role === 'reply') {
-        const tag = el('div', 'tag', m.role === 'user' ? `${state.user || 'YOU'} ▸` : '◂ CONTINUUM');
+        const tag = el('div', 'tag', m.role === 'user' ? (state.user || 'YOU').toUpperCase() : 'CONTINUUM');
         tag.setAttribute('aria-hidden', 'true');
         item.append(tag);
       }

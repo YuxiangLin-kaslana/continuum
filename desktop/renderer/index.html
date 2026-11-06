@@ -11,7 +11,7 @@
   <div id="app">
     <!-- The title bar: the window has no frame of its own, so this strip is where it is dragged. -->
     <div class="titlebar">
-      <span class="ident"><span class="mark">续</span><span class="callsign">CONTINUUM</span><span class="build" aria-hidden="true">TACTICAL ASSISTANT // v0.0.2</span></span>
+      <span class="ident"><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="m-lit" x1=".1" y1=".1" x2=".8" y2=".9"><stop offset="0" stop-color="#fff"/><stop offset=".55" stop-color="#ffeccb"/><stop offset="1" stop-color="#ffbf73"/></linearGradient><mask id="m-small"><rect width="24" height="24" fill="#000"/><circle cx="11" cy="11" r="8" fill="#fff"/><circle cx="14.2" cy="9.4" r="7.1" fill="#000"/></mask></defs><circle cx="11" cy="11" r="8" fill="none" stroke="#9ec6ff" stroke-opacity=".35" stroke-width=".8"/><rect width="24" height="24" fill="url(#m-lit)" mask="url(#m-small)"/></svg><span class="callsign">CONTINUUM</span><span class="build" aria-hidden="true">TACTICAL ASSISTANT · 0.0.2</span></span>
       <span class="window-controls">
         <button id="win-min" class="win min" title="最小化" aria-label="最小化"></button>
         <button id="win-close" class="win close" title="收进托盘" aria-label="收进托盘"></button>
@@ -20,12 +20,26 @@
 
     <section id="setup" class="setup" hidden>
       <div class="setup-card frame">
-        <div class="radar" aria-hidden="true">
-          <div class="rings"></div>
-          <div class="sweep"></div>
-          <div class="blip"></div>
+        <div class="wordmark" aria-hidden="true">
+          <svg class="wm-moon" viewBox="0 0 200 150" aria-hidden="true">
+            <defs>
+              <radialGradient id="w-halo" cx=".48" cy=".44" r=".5"><stop offset=".45" stop-color="#ffe7c2" stop-opacity=".30"/><stop offset="1" stop-color="#ffe7c2" stop-opacity="0"/></radialGradient>
+              <linearGradient id="w-lit" x1=".1" y1=".1" x2=".8" y2=".9"><stop offset="0" stop-color="#fff"/><stop offset=".55" stop-color="#ffeccb"/><stop offset="1" stop-color="#ffbf73"/></linearGradient>
+              <linearGradient id="w-rim" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9ec6ff" stop-opacity=".8"/><stop offset="1" stop-color="#b98cff" stop-opacity=".15"/></linearGradient>
+              <mask id="m-big"><rect width="200" height="150" fill="#000"/><circle cx="96" cy="68" r="50" fill="#fff"/><circle cx="117" cy="57" r="44" fill="#000"/></mask>
+              <filter id="w-glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            </defs>
+            <circle cx="96" cy="68" r="66" fill="url(#w-halo)"/>
+            <circle cx="96" cy="68" r="50" fill="#1b1840" fill-opacity=".4" stroke="url(#w-rim)" stroke-width="1.5"/>
+            <g filter="url(#w-glow)"><rect width="200" height="150" fill="url(#w-lit)" mask="url(#m-big)"/></g>
+            <circle cx="160" cy="24" r="2.4" fill="#fff"/>
+            <circle cx="174" cy="52" r="1.2" fill="#fff" opacity=".7"/>
+            <circle cx="30" cy="30" r="1.2" fill="#fff" opacity=".6"/>
+          </svg>
+          <div class="wm-title">CONTINUUM</div>
+          <div class="wm-sub">TACTICAL ASSISTANT</div>
         </div>
-        <p class="hud-label" aria-hidden="true">// ESTABLISH UPLINK</p>
+        <p class="hud-label" aria-hidden="true">ESTABLISH UPLINK</p>
         <h1 class="setup-title">连接到 Continuum 服务器</h1>
         <p class="lead">令牌由管理员在服务器上用 <code>continuum user add</code> 生成，只显示一次。</p>
         <form id="setup-form">
@@ -68,7 +82,7 @@
         <form id="composer" class="composer">
           <label for="input" class="sr">消息</label>
           <div class="input-frame frame">
-            <span class="prompt" aria-hidden="true">&gt;</span>
+            <span class="prompt" aria-hidden="true">›</span>
             <textarea id="input" rows="2" placeholder="交代一件事，Enter 发送，Shift+Enter 换行"></textarea>
           </div>
           <button id="send" type="submit" class="primary">发送<span class="en" aria-hidden="true">TRANSMIT</span></button>
