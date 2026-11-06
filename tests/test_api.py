@@ -171,6 +171,14 @@ def test_the_passwd_command_sets_a_password(tmp_path, monkeypatch):
     store = SQLiteStore(tmp_path / "continuum.db")
     assert Accounts(store).check_password("me", "a long enough password")
     store.close()
+    # A short password is refused unless the person running the server says they mean it.
+    monkeypatch.setattr("sys.stdin", io.StringIO("123456\n"))
+    assert main(["--home", str(tmp_path), "user", "passwd", "me", "--password-stdin"]) == 1
+    monkeypatch.setattr("sys.stdin", io.StringIO("123456\n"))
+    assert main(["--home", str(tmp_path), "user", "passwd", "me", "--password-stdin", "--allow-short"]) == 0
+    store = SQLiteStore(tmp_path / "continuum.db")
+    assert Accounts(store).check_password("me", "123456")
+    store.close()
 
 
 def test_a_revoked_token_no_longer_works(tmp_path):

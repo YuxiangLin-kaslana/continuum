@@ -72,11 +72,12 @@ class Accounts:
 
     # --- passwords ---
 
-    def set_password(self, user: str, password: str) -> None:
+    def set_password(self, user: str, password: str, min_length: int = MIN_PASSWORD) -> None:
+        """Set a user's password; `min_length` may be lowered only by the person running the server, on purpose."""
         if not USER_NAME.match(user):
             raise ValueError("a user name is 1-64 letters, digits, '.', '_' or '-'")
-        if len(password) < MIN_PASSWORD:
-            raise ValueError(f"a password has at least {MIN_PASSWORD} characters")
+        if len(password) < max(1, min_length):
+            raise ValueError(f"a password has at least {max(1, min_length)} characters")
         self.store.db.execute(
             "INSERT INTO passwords (user, hash, updated_at) VALUES (?, ?, ?) ON CONFLICT (user) DO UPDATE SET "
             "hash = excluded.hash, updated_at = excluded.updated_at",

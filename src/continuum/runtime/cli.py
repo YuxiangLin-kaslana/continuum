@@ -114,7 +114,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_user(args: argparse.Namespace) -> int:
-    from .accounts import Accounts
+    from .accounts import MIN_PASSWORD, Accounts
     from .store import SQLiteStore
 
     home = _home(args.home)
@@ -138,7 +138,7 @@ def cmd_user(args: argparse.Namespace) -> int:
                     print("The two passwords differ; nothing changed.", file=sys.stderr)
                     return 1
             try:
-                accounts.set_password(args.name, password)
+                accounts.set_password(args.name, password, min_length=1 if args.allow_short else MIN_PASSWORD)
             except ValueError as error:
                 print(f"continuum: {error}", file=sys.stderr)
                 return 1
@@ -178,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
     user.add_argument("name", nargs="?")
     user.add_argument("--device", help="a label for the device the token is for")
     user.add_argument("--password-stdin", action="store_true", help="passwd: read the password from standard input")
+    user.add_argument("--allow-short", action="store_true",
+                      help="passwd: accept a password shorter than 8 characters (easier to guess; failed logins are still throttled)")
     user.set_defaults(run=cmd_user)
     status = sub.add_parser("status", help="print tickets and problems")
     status.add_argument("--limit", type=int, default=10)
