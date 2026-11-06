@@ -1,10 +1,9 @@
-/* Continuum desktop — in the manner of a cinematic flight title (Ace Combat 8's restraint) under the moon of its logo:
-   a dusk sky at altitude, indigo overhead through violet and rose to an amber horizon; engraved serif capitals on
-   long baselines; wide-tracked light sans for labels; hairlines and dark glass instead of boxes. The dusk gradient
+/* Continuum desktop — in the manner of a cinematic flight title (Ace Combat 8's restraint) around the Continuum logo
+   (an open infinity over a rounded geometric wordmark): a dusk sky at altitude, indigo overhead through violet and
+   rose to an amber horizon; wide-tracked light geometric sans for labels; hairlines and dark glass instead of boxes. The dusk gradient
    (amber, rose, violet) marks what acts or needs a person; text stays white.
    One dark world on purpose: it does not follow the OS theme. */
 
-@font-face { font-family: "Cinzel"; src: url("fonts/Cinzel.woff2") format("woff2"); font-weight: 400 900; font-display: swap; }
 @font-face { font-family: "Jost"; src: url("fonts/Jost.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 
 :root {
@@ -30,7 +29,7 @@
   --sky-blue: #b9c9ff;
   --violet: #b273d9;
   --red: #e8585f;
-  --serif: "Cinzel", "Songti SC", "SimSun", serif;
+  --serif: "Jost", "Microsoft YaHei UI", "PingFang SC", sans-serif;
   --sans: "Jost", "Microsoft YaHei UI", "PingFang SC", "Noto Sans SC", sans-serif;
   --text: "Microsoft YaHei UI", "PingFang SC", "Noto Sans SC", "Jost", system-ui, sans-serif;
   color-scheme: dark;
@@ -102,11 +101,8 @@ code { font-family: var(--sans); font-size: 12px; color: var(--soft); letter-spa
   -webkit-app-region: drag; user-select: none;
 }
 .ident { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.mark { width: 18px; height: 18px; align-self: center; flex: none; filter: drop-shadow(0 0 4px rgba(255, 210, 150, 0.45)); }
-.callsign {
-  font-family: var(--serif); font-weight: 700; letter-spacing: 0.16em; font-size: 12px;
-  background: var(--pearl); -webkit-background-clip: text; background-clip: text; color: transparent;
-}
+.tb-mark { height: 11px; width: auto; color: var(--ink); flex: none; filter: drop-shadow(0 0 4px rgba(255, 210, 150, 0.5)); }
+.tb-word { height: 9px; width: auto; color: var(--ink); flex: none; opacity: 0.95; }
 .build { font-family: var(--sans); font-size: 8.5px; letter-spacing: 0.36em; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .window-controls { margin-left: auto; display: flex; height: 100%; -webkit-app-region: no-drag; }
 .win { position: relative; width: 40px; height: 100%; border: 0; background: transparent; color: var(--dim); }
@@ -122,24 +118,10 @@ code { font-family: var(--sans); font-size: 12px; color: var(--soft); letter-spa
 /* --- setup: the title card --- */
 .setup { display: grid; place-items: center; padding: 20px 22px; overflow-y: auto; }
 .setup-card { width: 100%; max-width: 360px; padding: 4px 0 8px; display: grid; gap: 10px; background: none; border: 0; }
-.wordmark { display: grid; justify-items: center; gap: 12px; margin: 0 0 22px; }
-.wm-moon { width: 150px; height: auto; margin-bottom: -18px; overflow: visible; }
-.wm-title {
-  position: relative; font-family: var(--serif); font-weight: 700; font-size: 34px; line-height: 1;
-  letter-spacing: 0.035em;
-  background: var(--pearl); -webkit-background-clip: text; background-clip: text; color: transparent;
-  text-decoration-color: #ffe4c2;
-  filter: drop-shadow(0 0 14px rgba(255, 190, 130, 0.25));
-  /* The letters stand on one long baseline, which runs past the word on both sides. */
-  text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 1px; text-decoration-skip-ink: none;
-}
-.wm-title::before, .wm-title::after {
-  content: ""; position: absolute; bottom: -2.5px; width: 34px; height: 1px; opacity: 0.8;
-}
-.wm-title::before { background: linear-gradient(90deg, transparent, #ffe4c2); }
-.wm-title::after { background: linear-gradient(90deg, #ffe4c2, transparent); }
-.wm-title::before { right: 100%; margin-right: 2px; }
-.wm-title::after { left: 100%; margin-left: 2px; }
+.wordmark { display: grid; justify-items: center; gap: 16px; margin: 0 0 26px; }
+/* The logo as given: the mark over the wordmark, white, with a warm glow from the horizon below. */
+.wm-mark { width: 132px; height: auto; color: #ffffff; filter: drop-shadow(0 0 18px rgba(255, 200, 150, 0.35)) drop-shadow(0 6px 24px rgba(178, 115, 217, 0.35)); }
+.wm-word { width: 220px; height: auto; color: #ffffff; margin-top: 4px; }
 .wm-sub {
   font-family: var(--sans); font-weight: 300; font-size: 11px; letter-spacing: 0.62em; padding-left: 0.62em;
   background: var(--dusk); -webkit-background-clip: text; background-clip: text; color: transparent;
@@ -163,7 +145,7 @@ label { font-size: 12px; color: var(--dim); margin-top: 8px; display: flex; just
 .link-text { font-family: var(--sans); font-size: 8.5px; letter-spacing: 0.38em; color: var(--faint); line-height: 1.4; }
 .pilot { font-size: 12px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pilot .en { font-size: 8.5px; letter-spacing: 0.38em; }
-.pilot .user { font-family: var(--serif); font-weight: 700; letter-spacing: 0.08em; color: var(--ink); }
+.pilot .user { font-family: var(--sans); font-weight: 500; letter-spacing: 0.1em; color: var(--ink); }
 
 .tabs { display: flex; gap: 4px; margin-left: auto; }
 .tabs button {
@@ -224,7 +206,7 @@ label { font-size: 12px; color: var(--dim); margin-top: 8px; display: flex; just
 .composer { display: flex; gap: 10px; padding: 12px 14px 14px; border-top: 1px solid var(--hair); align-items: stretch; background: rgba(14, 10, 30, 0.55); backdrop-filter: blur(10px); }
 .input-frame { flex: 1; min-width: 0; display: flex; gap: 8px; padding: 6px 10px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--hair); border-top-color: var(--hair); }
 .input-frame:focus-within { border-color: var(--hair-strong); }
-.prompt { font-family: var(--serif); color: var(--dim); padding-top: 1px; }
+.prompt { font-family: var(--sans); color: var(--dim); padding-top: 1px; }
 .composer textarea { flex: 1; min-width: 0; resize: none; min-height: 40px; max-height: 160px; border: 0; background: transparent; padding: 2px 0; }
 .composer textarea:focus { background: transparent; }
 .composer .primary { padding: 0 18px; justify-content: center; }
