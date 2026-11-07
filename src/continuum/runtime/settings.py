@@ -78,6 +78,8 @@ allowed = [{ id = "me" }]
 kind = "rules"
 
 # script: a named Python function does the work. agent: a chat model with a shell in a sandbox.
+# claude_code / codex: Claude Code or OpenAI Codex, signed in with your own account on this host (`claude setup-token`,
+# `codex login`), each run isolated from the host's secrets.
 [executor]
 kind = "script"
 max_workers = 3

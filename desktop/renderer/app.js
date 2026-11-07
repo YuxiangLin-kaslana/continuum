@@ -646,6 +646,9 @@
         if (state.streams.delete(event.ticket_id)) renderMessages();
       }, 15000));
       if (event.thread === state.thread) renderMessages();
+    } else if (event.type === 'stream' && !event.text) {
+      // What was being written turned out to be the worker talking as it works; it shows as a step instead.
+      if (state.streams.delete(event.ticket_id) && event.thread === state.thread) renderMessages();
     } else if (event.type === 'stream') {
       const fresh = !state.streams.has(event.ticket_id);
       state.streams.set(event.ticket_id, { thread: event.thread, text: event.text });

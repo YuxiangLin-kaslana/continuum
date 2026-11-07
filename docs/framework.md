@@ -56,7 +56,7 @@
 | Gate 规则 | `GateRule` | 对 Trigger 给出强度和依据，或弃权；按顺序组成链 | 白名单、准入表、机器人名单 | 部门规则、工作时间规则 |
 | 主动规则 | `ProactiveRule` | 描述一类"没人点名也可以接"的活，给 Assessor 看 | 文本规则 | 报价异常规则、交期变更规则 |
 | Assessor | `Assessor` | Eval 第二层判断 | LLM Router 会话、`always_ignore`（测试用） | 规则引擎、小模型分类器 |
-| Executor | `ExecutorKind` | 运行一个 Assignment：准备工作区、开会话、投递 Input、回报 | `agent`（内置工具循环）、`script`（确定性 Python 函数） | Codex / Claude Code CLI、OManus、`human`（派给人） |
+| Executor | `ExecutorKind` | 运行一个 Assignment：准备工作区、开会话、投递 Input、回报 | `agent`（内置工具循环）、`script`（确定性 Python 函数）、`claude_code`（Claude Code CLI）、`codex`（OpenAI Codex CLI） | OManus、`human`（派给人） |
 | 工具 | `ToolProvider` | 给 Worker 提供工具 | Python 函数工具、MCP 客户端 | BOM 解析、寻源、ERP 查询 |
 | 模型 | `ModelProvider` | 统一的对话/工具调用接口 | OpenAI 兼容（覆盖 DeepSeek） | Anthropic、本地模型 |
 | Effect 处理器 | `EffectHandler` | 一类持久副作用的执行器 | launch、delivery、relay、reply | 写审计、推送通知 |
@@ -170,3 +170,24 @@ F1 的取舍和已知限制（F2/F3 再处理）：
 
 - 单进程是否够用，还是一开始就把 Executor 放到独立进程/机器？
 - 插件的权限声明（`requires_permissions`）由谁审批、怎么落地到沙箱？
+
+## 用自己的 Claude / ChatGPT 账号当 Worker
+
+`claude_code` 和 `codex` 两个执行器调用本机已登录的官方命令行（`claude -p`、`codex exec`），读它们的 JSON 事件流：命令、文件改动变成工单的步骤，回答边写边推给桌面端，最后一条回答就是汇报。以【问题】开头是向人提问，【卡住】【失败】【无需处理】对应其余几种汇报。工具自己的会话记在工作区旁边，人回复后下一轮接着这个会话。
+
+```toml
+[executor]
+kind = "claude_code"        # 或 "codex"
+
+[executor.config]
+# model = "opus"            # 不写就用账号的默认模型
+# allowed_domains = ["pypi.org", "files.pythonhosted.org"]   # claude_code：命令能访问的域名，默认不联网
+# network = true            # codex：命令能否联网，默认否
+# instructions = "团队的要求"
+```
+
+隔离有两层，都默认开启：
+- 工具进程在 bubblewrap 里：系统只读，工作区可写，自己的登录状态可写；Continuum 的数据目录、`~/.config`、`~/.ssh`、云服务凭据、另一个工具的登录状态都看不到。进程本身要联网访问模型。
+- 它执行的每条命令再由工具自己的沙箱隔离（Claude Code 的 sandbox 需要 `bubblewrap` 和 `socat`；Codex 用 workspace-write）。Claude Code 的沙箱起不来时，这一轮直接失败，不会退回无沙箱运行。
+
+只用于你自己在自己的服务器上用：Anthropic 不允许第三方产品让别人用 claude.ai 账号登录，要给别人用就换成 API key。订阅有用量上限。
