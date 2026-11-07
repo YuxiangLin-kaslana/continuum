@@ -107,7 +107,9 @@ class ModelRouter:
             return None
         args = calls[0][2]
         reason = str(args.get("reason") or "")
-        if args.get("decision") != "accept":
+        # Only an explicit ignore drops a message, since nobody hears back from one: a model that leaves the decision
+        # out (it happens) takes the side the rules take when unsure.
+        if args.get("decision") == "ignore":
             # A recorded judgement, not an unassessed ignore.
             return Ignore(reason=reason or "router ignored it", audit={"router": args})
         title = str(args.get("title") or candidate.triggers[-1].text[:40])

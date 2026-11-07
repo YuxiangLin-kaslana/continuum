@@ -262,3 +262,64 @@ def test_the_runtime_takes_either_agent_as_its_executor(tmp_path, kind):
             await rt.close()
 
     assert asyncio.run(main()) == {"claude_code": "ClaudeCodeConfig", "codex": "CodexConfig"}[kind]
+
+
+def test_the_deepseek_worker_hands_a_task_to_claude_code_and_reports_its_result(tmp_path):
+    from test_agent import ScriptedModel, StreamingModel, agent_runtime, call
+
+    log = tmp_path / "log"
+    claude = fake(tmp_path, "claude", CLAUDE)
+    router = ScriptedModel(call("decide", decision="accept", title="写个脚本", scope="写并运行脚本",
+                                acknowledgement="好，我来安排。", name="Script", reason="明确请求"))
+    worker = StreamingModel(
+        call("claude_code", task="写一个 note.txt，内容 ok，并运行 echo hi"),
+        lambda messages: call("claude_code", task="第二轮：再检查一遍"),
+        lambda messages: call("report", state="ready", summary=f"Claude Code 说：{messages[-1]['content']}"))
+
+    async def main():
+        rt = agent_runtime(tmp_path / "home", router, worker, sources={"app": {"kind": "app"}},
+                           policy={"sources": {"app": {"allowed": [{"id": "me"}]}}})
+        rt.settings.executor.config["claude_code"] = {"command": claude, "isolation": "none",
+                                                      "env": {"FAKE_LOG": str(log)}}
+        rt.executor.context.config = type(rt.executor.context.config).model_validate(rt.settings.executor.config)
+        ctx = rt.sources["app"]
+        try:
+            rt.start()
+            ctx.kind.post(ctx, "me", "main", "写个脚本跑一下")
+            done = lambda: any(r["role"] == "reply" for r in ctx.kind.history(ctx, "me", "main"))  # noqa: E731
+            await drive(rt, done, timeout=15)
+            return ctx.kind.history(ctx, "me", "main"), ctx.kind.steps(ctx, "me", "main"), worker.seen
+        finally:
+            await rt.close()
+
+    history, steps, seen = asyncio.run(main())
+    assert history[-1]["text"] == "Claude Code 说：好的，按你说的改完了。"
+    # The worker was told it has Claude Code, and was offered the tool.
+    assert "claude_code" in seen[0][0]["content"]
+    names = [(s["name"], s["status"]) for s in steps]
+    assert names[0] == ("claude_code", "done") and ("shell", "done") in names and ("write_file", "done") in names
+    assert steps[0]["input"].startswith("写一个 note.txt") and "跑完了" in steps[0]["output"]
+    # Its first call started a session with the tool's rules; the second went on in it.
+    first, second = calls(log)
+    assert "交回给 Worker" in first[first.index("--append-system-prompt") + 1]
+    assert second[second.index("--resume") + 1] == first[first.index("--session-id") + 1]
+
+
+def test_an_agent_installed_for_the_user_is_found_off_the_services_path(tmp_path, monkeypatch):
+    from continuum.plugins import cli_agents
+
+    home = tmp_path / "home"
+    (home / ".npm-global" / "bin").mkdir(parents=True)
+    tool = home / ".npm-global" / "bin" / "claude"
+    tool.write_text("#!/bin/sh\n")
+    tool.chmod(0o755)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    assert cli_agents.resolve("claude") == str(tool)
+    assert cli_agents.resolve("no-such-agent") is None
+
+    job = FakeJob(tmp_path / "work" / "t")
+    config = ClaudeCodeConfig(command="no-such-agent", isolation="none")
+    asyncio.run(ClaudeCodeExecutor().turn(ExecutorContext(config=config, scripts={}), job))
+    [(state, summary, _)] = job.reports
+    assert state == "failed" and "找不到命令 no-such-agent" in summary

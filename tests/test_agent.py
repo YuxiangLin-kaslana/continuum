@@ -238,6 +238,25 @@ def test_the_model_router_ignores_chat_and_inferred_candidates_without_rules(tmp
     asyncio.run(main())
 
 
+def test_a_router_answer_without_a_decision_still_takes_the_request(tmp_path):
+    # Seen from DeepSeek: every field of an accept but the decision itself. Only an explicit ignore drops a message.
+    router = ScriptedModel(call("decide", title="写并运行 fizzbuzz 脚本", scope="写 fizzbuzz.py 并运行",
+                                acknowledgement="好的，我来写。", name="fizzbuzz-script", reason="明确的任务"))
+
+    async def main():
+        rt = agent_runtime(tmp_path, router, ScriptedModel(call("report", state="ready", summary="写好了")))
+        try:
+            post(tmp_path, "写一个 fizzbuzz.py")
+            await drive(rt, lambda: len(replies(tmp_path)) == 2, timeout=10)
+            [ticket] = rt.store.tickets.list()
+            assert ticket.title == "写并运行 fizzbuzz 脚本"
+        finally:
+            await rt.close()
+
+    asyncio.run(main())
+    assert replies(tmp_path) == [("acknowledgement", "好的，我来写。"), ("reply", "写好了")]
+
+
 def test_the_agent_cannot_write_outside_its_workspace(tmp_path):
     router = ScriptedModel(call("decide", decision="accept", title="写文件", scope="写", reason="请求"))
     worker = ScriptedModel(

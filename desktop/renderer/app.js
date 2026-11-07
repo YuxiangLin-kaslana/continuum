@@ -38,6 +38,8 @@
     list_files: '<path d="M3 6h6l2 2h10v11H3z"/>',
     think: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18 16l.7 1.8 1.8.7-1.8.7L18 21l-.7-1.8-1.8-.7 1.8-.7z"/>',
     chevron: '<path d="m9 6 6 6-6 6"/>',
+    claude_code: '<path d="M4 12h11M11 7l5 5-5 5"/><rect x="16" y="4" width="5" height="16" rx="1"/>',
+    codex: '<path d="M4 12h11M11 7l5 5-5 5"/><rect x="16" y="4" width="5" height="16" rx="1"/>',
   };
 
   // --- avatars: a picture drawn from the name, for anyone who has none of their own ---
@@ -352,7 +354,10 @@
 
   // --- what the worker does: its steps, folded into one box per ticket, the way a chat app shows tool calls ---
 
-  const STEP_NAMES = { shell: '运行命令', read_file: '读取文件', write_file: '写入文件', list_files: '查看目录' };
+  const STEP_NAMES = {
+    shell: '运行命令', read_file: '读取文件', write_file: '写入文件', list_files: '查看目录',
+    claude_code: '交给 Claude Code', codex: '交给 Codex',
+  };
 
   function remember(details, key, fallback) {
     details.open = state.open.has(key) ? state.open.get(key) : fallback;
@@ -395,7 +400,8 @@
     const counted = steps.filter((s) => s.name !== 'note' && s.name !== 'think').length;
     const current = [...steps].reverse().find((s) => s.status === 'running');
     let label;
-    if (current) label = `正在${STEP_NAMES[current.name] || '处理'}…`;
+    const busy = { claude_code: 'Claude Code 正在处理…', codex: 'Codex 正在处理…' };
+    if (current) label = busy[current.name] || `正在${STEP_NAMES[current.name] || '处理'}…`;
     else if (thinking) label = '思考中…';
     else label = counted ? `已执行 ${counted} 个步骤` : '已思考';
     summary.append(el('span', running ? 'work-spin' : 'work-done'), el('span', 'work-label', label), icon('chevron'));

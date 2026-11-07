@@ -21,7 +21,8 @@ from continuum.core.errors import UserError
 from continuum.models import ChatModel, ModelError, partial_string, tool, tool_calls
 from continuum.plugin import ExecutorContext
 
-from . import sandbox
+from . import cli_agents, sandbox
+from .cli_agents import ClaudeCodeConfig, CodexConfig
 from .sandbox import SandboxConfig
 
 log = logging.getLogger("continuum.agent")
@@ -62,10 +63,27 @@ TOOLS = [
     tool("handback", "把一条超出本工单的消息退回，让系统重新判断。",
          {"trigger_id": {"type": "string"}, "reason": {"type": "string"}}),
 ]
+# Claude Code and Codex, when the settings name them: coding agents the worker hands part of its job to.
+DELEGATE_TOOLS = {
+    "claude_code": tool(
+        "claude_code", "把一件编程子任务交给 Claude Code（用人自己的 Claude 账号）在同一个工作区里完成，返回它的结果。"
+        "适合写或改较多代码、调试、读懂一个项目。它看不到对话，task 要写清楚目标、相关文件和完成标准。",
+        {"task": {"type": "string"}, "fresh": {"type": "boolean", "description": "true 时开新会话；默认接着本工单上次的会话"}},
+        required=["task"]),
+    "codex": tool(
+        "codex", "把一件编程子任务交给 OpenAI Codex（用人自己的 ChatGPT 账号）在同一个工作区里完成，返回它的结果。"
+        "适合写或改较多代码、调试、读懂一个项目。它看不到对话，task 要写清楚目标、相关文件和完成标准。",
+        {"task": {"type": "string"}, "fresh": {"type": "boolean", "description": "true 时开新会话；默认接着本工单上次的会话"}},
+        required=["task"]),
+}
+DELEGATING = """
+你还有编程助手可用（{names}）：较大的编程工作交给它们，你负责拆解任务、写清楚 task、检查它们的结果（看文件、跑一下），
+再向人汇报。它们和你用同一个工作区；简单的命令自己跑就行，不用交给它们。
+"""
 ENDS_TURN = {"ready", "blocked", "failed", "dropped"}
 # The tools whose work a person sees as steps of the turn; the rest are the worker's calls to the host, whose words
 # reach the person as messages.
-SHOWN = {"shell", "read_file", "write_file", "list_files"}
+SHOWN = {"shell", "read_file", "write_file", "list_files", "claude_code", "codex"}
 SHOWN_OUTPUT = 4000
 
 
@@ -77,6 +95,12 @@ class AgentConfig(BaseModel):
     instructions: str = ""
     # Merged into each model request, such as {"reasoning_effort": "low"}.
     extra: dict[str, Any] = {}
+    # Claude Code and Codex as tools, when set (an empty table takes the defaults).
+    claude_code: ClaudeCodeConfig | None = None
+    codex: CodexConfig | None = None
+
+    def delegates(self) -> dict[str, Any]:
+        return {name: c for name, c in (("claude_code", self.claude_code), ("codex", self.codex)) if c is not None}
 
 
 def transcript_path(workdir: Path) -> Path:
@@ -100,6 +124,8 @@ def _step_input(name: str, args: dict[str, Any]) -> str:
         return str(args["_invalid"])[:200]
     if name == "shell":
         return str(args.get("command", ""))
+    if name in DELEGATE_TOOLS:
+        return str(args.get("task", ""))
     return str(args.get("path") or ".")
 
 
@@ -156,8 +182,11 @@ class AgentExecutor:
             raise LookupError(f"no model named {config.model!r}; add [models.{config.model}] to the settings")
         path = transcript_path(job.workdir)
         messages: list[dict[str, Any]] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        delegates = config.delegates()
+        tools = [*TOOLS, *(DELEGATE_TOOLS[name] for name in delegates)]
         if not messages:
-            system = SYSTEM + (f"\n团队的要求：\n{config.instructions}\n" if config.instructions else "")
+            system = SYSTEM + (DELEGATING.format(names="、".join(delegates)) if delegates else "")
+            system += f"\n团队的要求：\n{config.instructions}\n" if config.instructions else ""
             messages = [{"role": "system", "content": system}, {"role": "user", "content": job.assignment}]
         job.workdir.mkdir(parents=True, exist_ok=True)
 
@@ -172,10 +201,10 @@ class AgentExecutor:
                 started = time.monotonic()
                 live = _Live(job)
                 if hasattr(model, "stream"):
-                    message = await model.stream(messages, tools=TOOLS, on_progress=live, **config.extra)
+                    message = await model.stream(messages, tools=tools, on_progress=live, **config.extra)
                     live(message, final=True)
                 else:
-                    message = await model.complete(messages, tools=TOOLS, **config.extra)
+                    message = await model.complete(messages, tools=tools, **config.extra)
                 self._show_words(job, message, time.monotonic() - started)
                 kept = {k: v for k, v in message.items() if k in ("role", "content", "tool_calls", "reasoning_content")}
                 kept["content"] = kept.get("content") or ""
@@ -215,7 +244,8 @@ class AgentExecutor:
                           args: dict[str, Any]) -> tuple[str, bool]:
         if name not in SHOWN:
             return await self._call(job, config, name, args)
-        key = call_id or uuid.uuid4().hex
+        # A model may reuse a call id across turns; the step is this call's alone.
+        key = f"{call_id or 'call'}-{uuid.uuid4().hex[:8]}"
         step = {"type": "step", "key": key, "name": name, "input": _step_input(name, args)}
         job.activity({**step, "status": "running", "output": ""})
         result, ends = await self._call(job, config, name, args)
@@ -248,6 +278,13 @@ class AgentExecutor:
                 target = _inside(job.workdir, str(args.get("path") or "."))
                 entries = sorted(p.name + ("/" if p.is_dir() else "") for p in target.iterdir())
                 return "\n".join(entries) or "（空）", False
+            if name in DELEGATE_TOOLS:
+                delegate_config = config.delegates().get(name)
+                if delegate_config is None:
+                    return f"错误：没有配置 {name}", False
+                answer = await cli_agents.delegate(name, delegate_config, job, str(args.get("task", "")),
+                                                   bool(args.get("fresh")))
+                return answer if len(answer) <= 20000 else answer[:20000] + "\n...[后面截断]", False
             if name == "ack":
                 job.ack(str(args["trigger_id"]), str(args["text"]))
                 return "已确认", False
