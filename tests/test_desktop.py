@@ -138,7 +138,7 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
             page.screenshot(path=f"{SHOTS}/desktop-streaming.png")
         page.evaluate("window.__fake.hold = false; window.__fake.release()")
         page.wait_for_selector(".msg.reply >> text=已处理「顺便核一下交期」")
-        assert page.locator(".msg.streaming").count() == 0 and page.locator(".work.running").count() == 0
+        page.wait_for_function("!document.querySelector('.msg.streaming') && !document.querySelector('.work.running')")
         roles = [c.split()[1] for c in page.eval_on_selector_all(".msg", "ns => ns.map(n => n.className)")]
         assert roles[-3:] == ["user", "acknowledgement", "reply"] and page.input_value("#input") == ""
         # The assistant's words are not boxed; the person's are.

@@ -3,7 +3,9 @@
 (function () {
   const listeners = { event: [], state: [], update: [] };
   const fire = (kind, payload) => listeners[kind].forEach((fn) => fn(payload));
-  const now = () => new Date().toISOString();
+  // A clock that only moves forward, a second per reading: what happened first always sorts first.
+  let clock = Date.now() - 3600 * 1000;
+  const now = () => new Date(clock = Math.max(clock + 1000, Date.now() - 1800 * 1000)).toISOString();
   const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
   let configured = false;
   let nextId = 1;
