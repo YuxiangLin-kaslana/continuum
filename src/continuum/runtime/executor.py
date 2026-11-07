@@ -64,8 +64,14 @@ class Job:
         self.requester = ticket.mandate.actor.id
         self.assignment = ticket.execution.assignment if ticket.execution else ticket.title
         self.workdir = Path(ticket.execution.directory) if ticket.execution else Path(".")
+        # Where this run keeps its own state (a transcript, an agent's session): beside its workspace for a one-off
+        # run, but per run when several runs of a project share one workspace.
+        self._state = session.host.home / "work" / ticket.execution.name if ticket.execution else self.workdir
         self.reports: list[ReportState] = []
         self.took_inputs = False
+
+    def state_file(self, suffix: str) -> Path:
+        return Path(str(self._state) + suffix)
 
     async def inputs(self) -> list[InputView]:
         """The Inputs delivered since the last call; reading them tells the Engine the worker has them."""
@@ -212,6 +218,9 @@ class InProcessExecutor:
         self.paused = paused
         self.on_report = on_report
         self.on_activity = on_activity
+        # Set by the runtime: the long-running project a new ticket belongs to, and the projects themselves.
+        self.project_for: Callable[[Ticket], Any] | None = None
+        self.projects: Any = None
         self.sessions: dict[str, Session] = {}
         # Every running turn, including one whose session was stopped and is still finishing: each holds a slot.
         self.turns: set[asyncio.Task] = set()
@@ -252,8 +261,20 @@ class InProcessExecutor:
         origin = self.store.triggers.get(ticket.origin.trigger_id)
         if origin:
             lines.append(f"Request from {origin.actor.id}: {origin.text}")
+        directory = self.home / "work" / name
+        project = self.project_for(ticket) if self.project_for else None
+        if project is not None:
+            # A run of a long-running project works in the project's workspace, with what earlier runs left.
+            directory = self.projects.workspace(project)
+            lines += [f"Project: {project.name}", f"Goal: {project.goal}",
+                      f"Charter (what the person authorized this project to do on its own): {project.charter or '-'}",
+                      "Notes: NOTES.md in the workspace is the project's memory. Read it first; before you finish, "
+                      "add what the next run should know (results, decisions, the person's preferences)."]
+            notes = self.projects.notes(project)
+            if notes.strip():
+                lines.append(f"NOTES.md so far:\n{notes}")
         return ticket.model_copy(update={"execution": Execution(
-            name=name, directory=str(self.home / "work" / name), assignment="\n".join(lines))})
+            name=name, directory=str(directory), assignment="\n".join(lines))})
 
     # --- reports ---
 

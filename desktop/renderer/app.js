@@ -1,14 +1,15 @@
-// The window: log in once, then conversations (a channel list and the current one) and the tickets they started.
+// The window: log in once, then one conversation with the assistant, which the person's projects can narrow.
 // Everything goes through window.continuum (preload.js); results come back as { ok, data } or { ok: false, error }.
 (function () {
   'use strict';
   const api = window.continuum;
   const $ = (id) => document.getElementById(id);
   const state = {
-    user: '', connection: 'offline', view: 'chat', thread: 'main',
-    threads: [], messages: new Map(), tickets: new Map(), unread: new Set(),
-    // What the workers do, per conversation: their steps (kept by the server), and what is live only now: the
-    // answer being written and the model thinking, per ticket.
+    user: '', connection: 'offline', view: 'chat',
+    // The conversation is one; `focus` is the project it is narrowed to (null: everything).
+    focus: null, messages: new Map(), projects: [], unread: new Set(), archived: false,
+    // What the workers do: their steps (kept by the server), and what is live only now: the answer being written
+    // and the model thinking, per ticket, each with its project.
     steps: new Map(), streams: new Map(), thinking: new Map(),
     // Which step boxes a person opened or closed by hand.
     open: new Map(),
@@ -38,6 +39,8 @@
     list_files: '<path d="M3 6h6l2 2h10v11H3z"/>',
     think: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18 16l.7 1.8 1.8.7-1.8.7L18 21l-.7-1.8-1.8-.7 1.8-.7z"/>',
     chevron: '<path d="m9 6 6 6-6 6"/>',
+    bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+    repeat: '<path d="M4 12a8 8 0 0 1 14-5.3L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-14 5.3L4 15"/><path d="M4 20v-5h5"/>',
     claude_code: '<path d="M4 12h11M11 7l5 5-5 5"/><rect x="16" y="4" width="5" height="16" rx="1"/>',
     ssh: '<rect x="3" y="4" width="18" height="7" rx="1"/><rect x="3" y="13" width="18" height="7" rx="1"/><path d="M7 7.5h.01M7 16.5h.01"/>',
     codex: '<path d="M4 12h11M11 7l5 5-5 5"/><rect x="16" y="4" width="5" height="16" rx="1"/>',
@@ -245,13 +248,13 @@
   $('menu').addEventListener('click', async () => {
     await call('logout');
     state.messages.clear();
-    state.tickets.clear();
+    state.projects = [];
     state.shown.clear();
     state.unread.clear();
     state.steps.clear();
     state.streams.clear();
     state.thinking.clear();
-    state.thread = 'main';
+    state.focus = null;
     showSetup();
   });
 
@@ -263,8 +266,12 @@
     $('me-avatar').innerHTML = picture(user, false);
     $('setup').hidden = true;
     $('main').hidden = false;
-    await Promise.all([loadThreads(), loadTickets()]);
-    await openThread(state.thread);
+    if (api.setTimezone) {
+      // Schedules fall on the person's own clock.
+      call('setTimezone', Intl.DateTimeFormat().resolvedOptions().timeZone).catch(() => {});
+    }
+    await loadAll();
+    renderMessages(true);
     $('input').focus();
     // Every login asks whether a newer version is out.
     checkUpdate(false);
@@ -277,7 +284,7 @@
       button.setAttribute('aria-selected', String(button.dataset.view === view));
     }
     $('view-chat').hidden = view !== 'chat';
-    $('view-tickets').hidden = view !== 'tickets';
+    $('view-projects').hidden = view !== 'projects';
     $('view-settings').hidden = view !== 'settings';
     $('view-workers').hidden = view !== 'workers';
     if (view === 'workers') loadWorkers();
@@ -289,100 +296,134 @@
     button.addEventListener('click', () => setView(button.dataset.view));
   }
 
-  // --- channels ---
+  // --- projects: what the person's work is about. The conversation is one; opening a project narrows it ---
 
-  function threadName(name) {
-    return name === 'main' ? '主对话' : name;
+  const PROJECT_STATES = {
+    proposed: '等你确认', active: '进行中', waiting: '等你回答', paused: '已暂停', ended: '已结束', refused: '没有采用',
+  };
+
+  function projectById(id) {
+    return state.projects.find((p) => p.id === id) || null;
   }
 
-  async function loadThreads() {
+  function projectName(id, meta) {
+    const project = projectById(id);
+    return project ? project.name : (meta && meta.project_name) || '项目';
+  }
+
+  async function loadProjects() {
     try {
-      state.threads = await call('threads');
+      state.projects = await call('projects');
     } catch (error) {
       showStatus(error.message);
-      state.threads = [];
     }
-    renderThreads();
+    renderSidebar();
+    renderProjects();
+    renderHead();
+    // Messages that name a project (a proposal, a reminder) read better once the project is known.
+    if (!$('main').hidden) renderMessages();
   }
 
-  function threadNames() {
-    // The main conversation first, then the others as the server lists them (newest first).
-    const names = state.threads.map((t) => t.thread).filter((n) => n !== 'main');
-    if (state.thread !== 'main' && !names.includes(state.thread)) names.unshift(state.thread);
-    return ['main', ...names];
+  let projectsSoon = null;
+  function projectsChanged() {
+    if (projectsSoon) return;
+    projectsSoon = setTimeout(() => { projectsSoon = null; loadProjects(); }, 400);
   }
 
-  function renderThreads() {
-    const names = threadNames();
-    $('threads').replaceChildren(...names.map((name) => {
-      const item = el('li');
-      const button = el('button', state.unread.has(name) ? 'unread' : '');
-      button.setAttribute('role', 'option');
-      button.setAttribute('aria-selected', String(name === state.thread));
-      button.dataset.thread = name;
-      button.append(icon(name === 'main' ? 'chat' : 'hash'), el('span', '', threadName(name)));
-      button.addEventListener('click', () => openThread(name));
-      item.append(button);
-      return item;
-    }));
-    $('thread-title').textContent = threadName(state.thread);
-    $('thread-no').textContent = `#${String(names.indexOf(state.thread) + 1).padStart(3, '0')}`;
+  function sideItem(id, label, iconName, note) {
+    const item = el('li');
+    const button = el('button', state.unread.has(id) ? 'unread' : '');
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', String(id === state.focus));
+    button.dataset.project = id || 'main';
+    button.append(icon(iconName), el('span', 'side-name', label));
+    if (note) button.append(el('span', 'side-note', note));
+    button.addEventListener('click', () => openProject(id));
+    item.append(button);
+    return item;
   }
 
-  async function openThread(name) {
-    state.thread = name;
-    state.unread.delete(name);
-    renderThreads();
-    await loadHistory(name);
+  function renderSidebar() {
+    const ongoing = state.projects.filter((p) => p.kind === 'ongoing' && p.state !== 'ended');
+    const open = state.projects.filter((p) => p.kind === 'once' && p.state !== 'ended');
+    const archived = state.projects.filter((p) => p.state === 'ended');
+    const items = [sideItem(null, '主对话', 'chat')];
+    const head = (text) => items.push(el('li', 'side-head', text));
+    const note = (p) => (p.state === 'proposed' || p.state === 'waiting' || p.question ? '!' : p.state === 'paused' ? '停' : '');
+    if (ongoing.length) {
+      head('长期项目');
+      for (const p of ongoing) items.push(sideItem(p.id, p.name, 'repeat', note(p)));
+    }
+    if (open.length) {
+      head('进行中');
+      for (const p of open) items.push(sideItem(p.id, p.name, 'hash', note(p)));
+    }
+    if (archived.length) {
+      const toggle = el('li', 'side-head toggle');
+      const button = el('button', '', `${state.archived ? '收起已归档' : '已归档'} ${archived.length}`);
+      button.addEventListener('click', () => { state.archived = !state.archived; renderSidebar(); });
+      toggle.append(button);
+      items.push(toggle);
+      if (state.archived) for (const p of archived.slice(0, 30)) items.push(sideItem(p.id, p.name, 'check'));
+    }
+    $('threads').replaceChildren(...items);
   }
 
-  $('new-thread').addEventListener('click', () => {
-    const d = new Date();
-    const name = `t-${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
-    if (!state.messages.has(name)) state.messages.set(name, []);
-    state.thread = name;
+  function renderHead() {
+    const project = state.focus ? projectById(state.focus) : null;
+    $('thread-title').textContent = project ? project.name : '主对话';
+    $('thread-no').textContent = project
+      ? `${project.kind === 'ongoing' ? '长期项目' : '一次性'} · ${PROJECT_STATES[project.state] || project.state}`
+      : '全部消息';
+    const closed = Boolean(project && project.kind === 'ongoing' && (project.state === 'ended' || project.state === 'refused'));
+    $('input').placeholder = closed ? '这个项目已经结束了'
+      : project ? `对「${project.name}」说（仍在主对话里）` : '输入消息，Enter 发送';
+    $('input').disabled = closed;
+  }
+
+  function openProject(id) {
+    state.focus = id;
+    if (id) state.unread.delete(id);
     setView('chat');
-    renderThreads();
-    renderMessages();
-  });
+    renderSidebar();
+    renderHead();
+    renderMessages(true);
+  }
 
-  // --- conversation ---
+  // --- the conversation: everything said, each message with the project it belongs to ---
 
-  async function loadHistory(thread) {
-    const known = state.messages.get(thread) || [];
-    const after = known.length ? known[known.length - 1].id : 0;
+  async function loadAll() {
+    const known = [...state.messages.keys()];
+    const after = known.length ? Math.max(...known) : 0;
     try {
-      const [rows, steps] = await Promise.all([call('history', thread, after), api.steps ? call('steps', thread) : []]);
+      const [rows, steps] = await Promise.all([call('everything', after), call('allSteps')]);
       for (const row of rows) addMessage(row, false);
-      state.steps.set(thread, new Map(steps.map((step) => [`${step.ticket_id}:${step.key}`, step])));
+      state.steps = new Map(steps.map((step) => [`${step.ticket_id}:${step.key}`, step]));
     } catch (error) {
       showStatus(error.message);
     }
-    if (!state.messages.has(thread)) state.messages.set(thread, []);
-    if (thread === state.thread) renderMessages(true);
+    await loadProjects();
+  }
+
+  function visible(project) {
+    return state.focus === null || project === state.focus;
   }
 
   function addMessage(row, render = true) {
-    const list = state.messages.get(row.thread) || [];
-    if (list.some((m) => m.id === row.id)) return;
-    list.push(row);
-    list.sort((a, b) => a.id - b.id);
-    state.messages.set(row.thread, list);
+    const fresh = !state.messages.has(row.id);
+    state.messages.set(row.id, row);
     // The answer arrived: what was being written gives way to it.
-    if (row.ticket_id && row.role !== 'user' && row.role !== 'acknowledgement') state.streams.delete(row.ticket_id);
-    if (!state.threads.some((t) => t.thread === row.thread)) {
-      state.threads.unshift({ thread: row.thread });
-      renderThreads();
+    if (row.ticket_id && !['user', 'acknowledgement', 'scheduled'].includes(row.role)) state.streams.delete(row.ticket_id);
+    if (fresh && row.project && !visible(row.project) && row.role !== 'user') {
+      state.unread.add(row.project);
+      renderSidebar();
     }
-    if (row.thread !== state.thread) {
-      if (row.role !== 'user') state.unread.add(row.thread);
-      renderThreads();
-    } else if (render) {
-      renderMessages();
-    }
+    if (row.project && !projectById(row.project)) projectsChanged();
+    if (render) renderMessages();
   }
 
   function message(m) {
+    if (m.role === 'proposal') return proposal(m);
     const item = el('li', `msg ${m.role}`);
     const mine = m.role === 'user';
     const face = mine ? avatar(m.user || state.user, false) : avatar(ASSISTANT, true);
@@ -391,11 +432,71 @@
       const { html, rich } = markdown(m.text);
       bubble.innerHTML = html;
       if (rich) item.classList.add('rich');
+    } else if (m.role === 'reminder') {
+      bubble.append(icon('bell'), el('span', '', m.text));
+    } else if (m.role === 'scheduled') {
+      bubble.append(icon('repeat'), el('span', '', `定时任务：${m.text.replace(/^【定时任务】/, '')}`));
     } else {
       bubble.textContent = m.text;
     }
-    item.append(face, bubble, el('div', 'meta', time(m.at)));
+    const meta = el('div', 'meta');
+    meta.append(el('span', '', time(m.at)));
+    // In the whole conversation, a message says which project it belongs to; in a project, that goes without saying.
+    if (m.project && state.focus === null) {
+      const chip = el('button', 'project-chip', `# ${projectName(m.project, m.meta)}`);
+      chip.addEventListener('click', () => openProject(m.project));
+      meta.append(chip);
+    }
+    item.append(face, bubble, meta);
     return arrival(item, `m:${m.id}`);
+  }
+
+  // A long-running project the assistant proposes: what it is for, what it may do, when it acts; the person decides.
+  function proposal(m) {
+    const meta = m.meta || {};
+    const project = projectById(meta.project);
+    let decided = meta.state && meta.state !== 'proposed' ? meta.state : null;
+    if (!decided && project && project.state !== 'proposed') decided = project.state;
+    const item = el('li', 'msg proposal');
+    const card = el('div', 'proposal-card');
+    const head = el('div', 'proposal-head');
+    head.append(icon('repeat'), el('span', '', `提议一个长期项目：${meta.project_name || (project && project.name) || ''}`));
+    card.append(head);
+    if (project) {
+      const detail = el('dl', 'detail');
+      const row = (label, value) => { if (value) detail.append(el('dt', '', label), el('dd', '', value)); };
+      row('目标', project.goal);
+      row('可以自己做', project.charter);
+      row('安排', (project.schedules || [])
+        .map((s) => `${s.text_when} · ${s.action === 'run' ? '开工' : '提醒'}：${s.text}`).join('\n'));
+      if (project.ends_at) row('到期', day(project.ends_at));
+      card.append(detail);
+    }
+    const foot = el('div', 'actions');
+    if (decided) {
+      foot.append(el('span', `decided ${decided}`,
+        decided === 'refused' ? '没有采用' : `已确认 · ${PROJECT_STATES[decided] || decided}`));
+    } else {
+      const answer = (action) => async () => {
+        for (const b of foot.querySelectorAll('button')) b.disabled = true;
+        try {
+          await call('projectAction', meta.project, action);
+          await loadProjects();
+          renderMessages();
+        } catch (error) {
+          showStatus(error.message);
+          for (const b of foot.querySelectorAll('button')) b.disabled = false;
+        }
+      };
+      const no = el('button', 'outline', '不要');
+      no.addEventListener('click', answer('refuse'));
+      const yes = el('button', 'outline amber', '确认开始');
+      yes.addEventListener('click', answer('confirm'));
+      foot.append(no, yes);
+    }
+    card.append(foot);
+    item.append(avatar(ASSISTANT, true), card, el('div', 'meta', time(m.at)));
+    return arrival(item, `m:${m.id}:${decided || ''}`);
   }
 
   // --- what the worker does: its steps, folded into one box per ticket, the way a chat app shows tool calls ---
@@ -514,13 +615,13 @@
   function renderMessages(toBottom = false) {
     const box = $('messages');
     const near = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
-    const list = state.messages.get(state.thread) || [];
-    const steps = [...(state.steps.get(state.thread) || new Map()).values()];
+    const list = [...state.messages.values()].filter((m) => visible(m.project)).sort((a, b) => a.id - b.id);
+    const steps = [...state.steps.values()].filter((s) => visible(s.project));
     // Messages and steps in the order they happened; the steps of one ticket in a row share a box.
     const timeline = [...list.map((m) => ({ at: m.at, m })), ...steps.map((s) => ({ at: s.at, s }))]
       .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
     const nodes = [];
-    const thinkingHere = new Set([...state.thinking].filter(([, thread]) => thread === state.thread).map(([t]) => t));
+    const thinkingHere = new Set([...state.thinking].filter(([, project]) => visible(project)).map(([t]) => t));
     let run = null;
     const flush = () => {
       if (!run) return;
@@ -548,7 +649,7 @@
       }
     }
     for (const [ticket, live] of state.streams) {
-      if (live.thread === state.thread) nodes.push(streamItem(ticket, live.text));
+      if (visible(live.project)) nodes.push(streamItem(ticket, live.text));
     }
     box.replaceChildren(...nodes);
     $('empty-chat').hidden = nodes.length > 0;
@@ -559,8 +660,8 @@
   function updateStream(ticket) {
     const live = state.streams.get(ticket);
     const node = document.getElementById(`stream-${ticket}`);
-    if (!live || !node || live.thread !== state.thread) {
-      if (live && live.thread === state.thread) renderMessages();
+    if (!live || !node || !visible(live.project)) {
+      if (live && visible(live.project)) renderMessages();
       return;
     }
     const box = $('messages');
@@ -577,7 +678,8 @@
     if (!text) return;
     $('send').disabled = true;
     try {
-      const row = await call('post', state.thread, text);
+      const project = state.focus ? projectById(state.focus) : null;
+      const row = await call('post', (project && project.thread) || 'main', text);
       $('input').value = '';
       autosize();
       addMessage(row);
@@ -603,111 +705,121 @@
     }
   });
 
-  // --- tickets ---
+  // --- the projects page: what waits for the person first, then what runs on its own, then the rest ---
 
-  async function loadTickets() {
-    try {
-      const list = await call('tickets');
-      state.tickets = new Map(list.map((t) => [t.id, t]));
-    } catch (error) {
-      showStatus(error.message);
-    }
-    renderTickets();
+  function stageText(p) {
+    if (p.kind === 'once' && p.state === 'ended') return OUTCOMES[p.outcome] || '已结束';
+    if (p.kind === 'once' && p.stage) return STAGES[p.action ? `${p.stage}/${p.action}` : p.stage] || STAGES[p.stage] || p.stage;
+    return PROJECT_STATES[p.state] || p.state;
   }
 
-  function stageText(t) {
-    if (t.stage === 'ended') return OUTCOMES[t.outcome] || t.outcome;
-    return STAGES[t.action ? `${t.stage}/${t.action}` : t.stage] || STAGES[t.stage] || t.stage;
+  function needsPerson(p) {
+    return p.state === 'proposed' || p.state === 'waiting' || Boolean(p.question);
   }
 
-  function card(t) {
-    const box = el('article', `card notched ${t.stage}`);
-    if (t.stage === 'ended' && t.outcome === 'completed') {
+  function projectCard(p) {
+    const kind = needsPerson(p) ? 'person' : p.state === 'ended' || p.state === 'refused' ? 'ended' : 'working';
+    const box = el('article', `card notched project ${kind} ${p.kind}`);
+    box.dataset.project = p.id;
+    if (p.state === 'ended' && (p.kind === 'ongoing' || p.outcome === 'completed')) {
       const check = el('span', 'check');
       check.append(icon('check'));
       box.append(check);
     }
     const top = el('div', 'card-top');
-    const id = el('span', 'ticket-id', `#${t.id.replace(/[^A-Za-z0-9]/g, '').slice(-4).toUpperCase()}`);
-    id.setAttribute('aria-hidden', 'true');
-    top.append(id, el('span', 'stage', stageText(t)));
-    box.append(top, el('div', 'card-title', t.title));
-
-    const rows = [];
-    if (t.question) rows.push(['需要你回答', t.question, 'question']);
-    if (t.report && t.report.summary) rows.push(['最新进展', t.report.summary, 'summary']);
-    if (rows.length) {
-      const detail = el('dl', 'detail');
-      for (const [label, value, cls] of rows) detail.append(el('dt', '', label), el('dd', cls, value));
-      box.append(detail);
+    top.append(el('span', 'ticket-id', `${p.kind === 'ongoing' ? '长期项目' : '一次性'} · #${p.id.slice(-4).toUpperCase()}`),
+      el('span', 'stage', stageText(p)));
+    box.append(top, el('div', 'card-title', p.name));
+    const detail = el('dl', 'detail');
+    const row = (label, value, cls = '') => { if (value) detail.append(el('dt', '', label), el('dd', cls, value)); };
+    if (p.question) row('需要你回答', p.question, 'question');
+    if (p.kind === 'ongoing') {
+      row('目标', p.goal);
+      row('安排', (p.schedules || []).map((s) => `${s.text_when} · ${s.action === 'run' ? '开工' : '提醒'}：${s.text}`).join('\n'));
+      if (p.next_at) row('下一次', `${day(p.next_at)} ${time(p.next_at)}`);
+      row('运行', `${p.runs} 次${p.busy ? `，${p.busy} 个 Worker 正在干活` : ''}`);
+    } else if (p.busy) {
+      row('现在', 'Worker 正在干活');
     }
+    if (detail.childNodes.length) box.append(detail);
 
     const foot = el('div', 'card-foot');
     const when = el('span', 'meta-item');
-    when.append(icon('calendar'), el('span', '', day(t.updated_at)));
+    when.append(icon('calendar'), el('span', '', day(p.last_at || p.updated_at || p.created_at)));
     foot.append(when);
-    if (t.thread) {
-      const where = el('span', 'meta-item');
-      where.append(icon('tag'), el('span', '', threadName(t.thread)));
-      foot.append(where);
-    }
     const actions = el('div', 'actions');
-    if (t.thread) {
-      const open = el('button', t.question ? 'outline amber' : 'outline', t.question ? '去回答' : '查看详情');
-      open.addEventListener('click', async () => {
-        setView('chat');
-        await openThread(t.thread);
+    const button = (text, cls, fn) => {
+      const b = el('button', cls, text);
+      b.addEventListener('click', fn);
+      actions.append(b);
+      return b;
+    };
+    const twice = (b, label, fn) => {
+      b.addEventListener('click', () => {
+        if (b.dataset.confirm) fn();
+        else { b.dataset.confirm = '1'; b.textContent = label; }
       });
-      actions.append(open);
-    }
-    if (t.can_retry) {
-      const retry = el('button', 'outline', '重试');
-      retry.addEventListener('click', () => act('retry', t.id));
-      actions.append(retry);
-    }
-    if (t.stage !== 'ended') {
-      const stop = el('button', 'outline danger', '停止');
-      stop.addEventListener('click', () => {
-        if (stop.dataset.confirm) act('stop', t.id);
-        else {
-          stop.dataset.confirm = '1';
-          stop.textContent = '确认停止？';
-        }
-      });
-      actions.append(stop);
+    };
+    if (p.state === 'proposed') {
+      button('不要', 'outline', () => projectAct(p.id, 'refuse'));
+      button('确认开始', 'outline amber', () => projectAct(p.id, 'confirm'));
+    } else {
+      button(p.question ? '去回答' : '打开', p.question ? 'outline amber' : 'outline', () => openProject(p.id));
+      if (p.kind === 'ongoing' && p.state === 'active') button('暂停', 'outline', () => projectAct(p.id, 'pause'));
+      if (p.kind === 'ongoing' && p.state === 'paused') button('继续', 'outline', () => projectAct(p.id, 'resume'));
+      if (p.kind === 'ongoing' && (p.state === 'active' || p.state === 'paused')) {
+        const end = button('结束', 'outline danger', () => {});
+        twice(end, '确认结束？', () => projectAct(p.id, 'end'));
+      }
+      if (p.kind === 'once' && p.can_retry) button('重试', 'outline', () => act('retry', p.id));
+      if (p.kind === 'once' && p.state !== 'ended') {
+        const stop = button('停止', 'outline danger', () => {});
+        twice(stop, '确认停止？', () => act('stop', p.id));
+      }
     }
     foot.append(actions);
     box.append(foot);
-    return arrival(box, `t:${t.id}:${t.stage}:${t.outcome || ''}`);
+    return arrival(box, `p:${p.id}:${p.state}:${p.outcome || ''}`);
   }
 
-  async function act(method, id) {
+  async function projectAct(id, action) {
     try {
-      const updated = await call(method, id);
-      state.tickets.set(updated.id, updated);
-      renderTickets();
+      await call('projectAction', id, action);
       showStatus('');
     } catch (error) {
       showStatus(error.message);
     }
+    await loadProjects();
+    renderMessages();
   }
 
-  function renderTickets() {
-    const all = [...state.tickets.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  async function act(method, id) {
+    try {
+      await call(method, id);
+      showStatus('');
+    } catch (error) {
+      showStatus(error.message);
+    }
+    await loadProjects();
+  }
+
+  function renderProjects() {
+    const all = state.projects;
     const groups = [
-      ['等你处理', 'NEEDS YOU', 'person', all.filter((t) => t.stage === 'person')],
-      ['执行中', 'IN PROGRESS', 'working', all.filter((t) => t.stage === 'working' || t.stage === 'idle')],
-      ['已结束', 'ENDED', 'ended', all.filter((t) => t.stage === 'ended').slice(0, 10)],
+      ['等你处理', 'NEEDS YOU', 'person', all.filter((p) => needsPerson(p) && p.state !== 'ended')],
+      ['长期项目', 'ONGOING', 'working', all.filter((p) => p.kind === 'ongoing' && !needsPerson(p) && ['active', 'paused'].includes(p.state))],
+      ['进行中', 'IN PROGRESS', 'working', all.filter((p) => p.kind === 'once' && !needsPerson(p) && p.state !== 'ended')],
+      ['已归档', 'ARCHIVED', 'ended', all.filter((p) => p.state === 'ended').slice(0, 12)],
     ];
-    const box = $('tickets');
+    const box = $('projects');
     box.replaceChildren();
     for (const [name, label, kind, items] of groups) {
       if (!items.length) continue;
       const row = el('div', `group-row ${kind}`);
       row.append(el('h3', 'group', `${name} ${pad(items.length)}`), en(label));
-      box.append(row, ...items.map(card));
+      box.append(row, ...items.map(projectCard));
     }
-    $('empty-tickets').hidden = all.length > 0;
+    $('empty-projects').hidden = all.length > 0;
     const waiting = groups[0][3].length;
     $('badge').hidden = waiting === 0;
     $('badge').textContent = String(waiting);
@@ -766,9 +878,9 @@
     if (w.thread) {
       const actions = el('div', 'actions');
       const open = el('button', 'outline', '查看对话');
-      open.addEventListener('click', async () => {
-        setView('chat');
-        await openThread(w.thread);
+      open.addEventListener('click', () => {
+        const ongoing = w.thread && w.thread.startsWith('p-') ? w.thread.slice(2) : null;
+        openProject(ongoing && projectById(ongoing) ? ongoing : w.ticket_id);
       });
       actions.append(open);
       foot.append(actions);
@@ -1036,21 +1148,24 @@
 
   const lingering = new Map();
   api.onEvent((event) => {
-    if (event.type === 'message') addMessage(event.message);
-    else if (event.type === 'ticket') {
-      state.tickets.set(event.ticket.id, event.ticket);
-      renderTickets();
+    if (event.type === 'message') {
+      addMessage(event.message);
+      if (['proposal', 'notice', 'reminder', 'scheduled'].includes(event.message.role)) projectsChanged();
+    } else if (event.type === 'message-updated') {
+      state.messages.set(event.message.id, event.message);
+      renderMessages();
+    } else if (event.type === 'ticket') {
+      projectsChanged();
       workersChanged();
       if (event.ticket.stage !== 'working' && state.thinking.delete(event.ticket.id)) renderMessages();
     } else if (event.type === 'step') {
       const step = event.step;
-      if (!state.steps.has(step.thread)) state.steps.set(step.thread, new Map());
-      state.steps.get(step.thread).set(`${step.ticket_id}:${step.key}`, step);
-      if (step.thread === state.thread) renderMessages();
+      state.steps.set(`${step.ticket_id}:${step.key}`, step);
+      if (visible(step.project)) renderMessages();
       if (state.view === 'workers') workersChanged();
     } else if (event.type === 'thinking') {
-      state.thinking.set(event.ticket_id, event.thread);
-      if (event.thread === state.thread) renderMessages();
+      state.thinking.set(event.ticket_id, event.project);
+      if (visible(event.project)) renderMessages();
     } else if (event.type === 'idle') {
       state.thinking.delete(event.ticket_id);
       // An answer that was being written but never arrived as a message (the turn ended some other way) goes too.
@@ -1058,15 +1173,15 @@
       lingering.set(event.ticket_id, setTimeout(() => {
         if (state.streams.delete(event.ticket_id)) renderMessages();
       }, 15000));
-      if (event.thread === state.thread) renderMessages();
+      if (visible(event.project)) renderMessages();
     } else if (event.type === 'stream' && !event.text) {
       // What was being written turned out to be the worker talking as it works; it shows as a step instead.
-      if (state.streams.delete(event.ticket_id) && event.thread === state.thread) renderMessages();
+      if (state.streams.delete(event.ticket_id) && visible(event.project)) renderMessages();
     } else if (event.type === 'stream') {
       const fresh = !state.streams.has(event.ticket_id);
-      state.streams.set(event.ticket_id, { thread: event.thread, text: event.text });
+      state.streams.set(event.ticket_id, { project: event.project, text: event.text });
       if (fresh) state.thinking.delete(event.ticket_id);
-      if (event.thread === state.thread) (fresh ? renderMessages() : updateStream(event.ticket_id));
+      if (visible(event.project)) (fresh ? renderMessages() : updateStream(event.ticket_id));
     }
   });
 
@@ -1083,7 +1198,8 @@
     showStatus(connection === 'offline' && !$('main').hidden ? '和服务器断开了，正在重连…' : '');
     // Back online: catch up on what was said meanwhile.
     if (connection === 'online' && was !== 'online' && !$('main').hidden) {
-      await Promise.all([loadHistory(state.thread), loadTickets()]);
+      await loadAll();
+      renderMessages();
     }
   });
 

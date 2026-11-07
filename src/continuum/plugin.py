@@ -109,6 +109,8 @@ class ExecutorContext:
     models: Mapping[str, ChatModel] = field(default_factory=dict)
     # The SSH servers a worker may reach through the host, with their approvals (runtime.ssh.SshHosts).
     ssh: Any = None
+    # The person's projects, for a worker that proposes one (runtime.app.ProjectDesk).
+    projects: Any = None
 
 
 class ExecutorKind(Protocol):

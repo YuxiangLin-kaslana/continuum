@@ -1,7 +1,7 @@
 {
   "name": "continuum-desktop",
   "productName": "Continuum",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "description": "Continuum（续）桌面端",
   "main": "main.js",
   "private": true,

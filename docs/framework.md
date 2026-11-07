@@ -191,3 +191,16 @@ kind = "claude_code"        # 或 "codex"
 - 它执行的每条命令再由工具自己的沙箱隔离（Claude Code 的 sandbox 需要 `bubblewrap` 和 `socat`；Codex 用 workspace-write）。Claude Code 的沙箱起不来时，这一轮直接失败，不会退回无沙箱运行。
 
 只用于你自己在自己的服务器上用：Anthropic 不允许第三方产品让别人用 claude.ai 账号登录，要给别人用就换成 API key。订阅有用量上限。
+
+## 项目
+
+人看到的只有项目；工单留在内核里，做执行单位（一次运行就是一张工单）。
+
+- **一次性项目**：人提一件事，路由器接单，就是一个一次性项目（即这张工单）；做完自动归档，再提起时重新打开。
+- **长期项目**：Worker 用 `propose_project` 提议（名字、目标、章程、定时安排），人在对话里确认后生效。章程是人给的长期授权：项目只能在章程内自己开工，超出的事回到人这里。
+  - 定时安排有两种：`remind` 在主对话里发一条提醒；`run` 在项目自己的话题（`p-<id>`）里发一条“定时任务”，由路由器接单，开一次运行。
+  - 项目的每次运行共用项目的工作区（`<home>/projects/<id>`）和笔记 `NOTES.md`；Worker 开工时带上目标、章程和笔记，结束前把下次该知道的写进笔记。每次运行的对话记录和工具会话仍各存各的。
+  - 时间按人的时区（桌面端登录时上报）计算；可以暂停、继续、结束，也可以设到期日。
+- **一条对话**：人只和主 agent 对话。项目的消息（包括提醒）都在这一条对话里，带着所属项目的标记；在项目里说话，只是这条消息直接交给那个项目。
+
+接口：`GET /api/v1/messages`（全部消息，带 `project`）、`GET /api/v1/steps`、`GET /api/v1/projects`、`POST /api/v1/projects/{id}/confirm|refuse|pause|resume|end`、`PUT /api/v1/me/timezone`。

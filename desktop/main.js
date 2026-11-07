@@ -182,6 +182,12 @@ handle('api:steps', (thread) =>
   client.request('GET', `/api/v1/threads/${encodeURIComponent(thread)}/steps`));
 handle('api:tickets', () => client.request('GET', '/api/v1/tickets'));
 handle('api:workers', () => client.request('GET', '/api/v1/workers'));
+handle('api:everything', (after) => client.request('GET', `/api/v1/messages?after=${Number(after) || 0}`));
+handle('api:allSteps', () => client.request('GET', '/api/v1/steps'));
+handle('api:projects', () => client.request('GET', '/api/v1/projects'));
+handle('api:projectAction', (id, action) =>
+  client.request('POST', `/api/v1/projects/${encodeURIComponent(id)}/${encodeURIComponent(action)}`, {}));
+handle('api:setTimezone', (timezone) => client.request('PUT', '/api/v1/me/timezone', { timezone }));
 handle('api:approve', (ticketId, key, approve) => client.request(
   'POST', `/api/v1/approvals/${encodeURIComponent(ticketId)}/${encodeURIComponent(key)}`, { approve }));
 handle('api:ssh', () => client.request('GET', '/api/v1/ssh'));

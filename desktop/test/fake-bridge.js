@@ -1,26 +1,42 @@
 // A stand-in for preload.js, for testing the window in a plain browser: the same calls, backed by memory.
+// The person's work as the server shows it: one conversation, each message tagged with the project it belongs to.
 (function () {
   const listeners = { event: [], state: [], update: [] };
   const fire = (kind, payload) => listeners[kind].forEach((fn) => fn(payload));
   const now = () => new Date().toISOString();
+  const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
   let configured = false;
   let nextId = 1;
   const messages = [];
-  const tickets = [
-    { id: 't-1', title: '核对 Laser Control Board 的供应商报价', thread: 'main', stage: 'person', action: 'answer',
-      outcome: null, question: 'R12 用 0402 还是 0603 封装？两家报价差 12%。', can_retry: false,
-      report: { state: 'progress', summary: '已比对 3 家报价，发现 4 处差异。' }, updated_at: '2026-11-03T10:02:00Z' },
-    { id: 't-2', title: '整理本周交期变化', thread: 'main', stage: 'working', action: null, outcome: null,
-      question: null, can_retry: false, report: null, updated_at: '2026-11-03T10:01:00Z' },
-    { id: 't-3', title: '更新 BOM v3 的替代料', thread: 'main', stage: 'ended', action: null, outcome: 'completed',
-      question: null, can_retry: false, report: { state: 'ready', summary: '已生成 BOM_v3_alt.xlsx' },
-      updated_at: '2026-11-03T09:00:00Z' },
+  const SCHEDULES = [
+    { id: 's1', action: 'remind', text: '记得看巡检结果', text_when: '每天 09:00（Asia/Shanghai）' },
+    { id: 's2', action: 'run', text: '检查磁盘', text_when: '每天 08:30（Asia/Shanghai）' },
+  ];
+  const projects = [
+    { id: 'ops1', kind: 'ongoing', name: '服务器巡检', goal: '每天检查服务器磁盘', charter: '只读检查，超过 80% 提醒我',
+      state: 'active', thread: 'p-ops1', schedules: SCHEDULES, next_at: ago(-600), runs: 3, open_runs: 0, busy: 0,
+      question: null, created_at: ago(3000), updated_at: ago(60), last_at: ago(60), timezone: 'Asia/Shanghai' },
+    { id: 't-1', kind: 'once', name: '核对 Laser Control Board 的供应商报价', goal: '核对报价', state: 'waiting',
+      stage: 'person', action: 'answer', question: 'R12 用 0402 还是 0603 封装？两家报价差 12%。', thread: 'main',
+      runs: 1, open_runs: 1, busy: 0, can_retry: false, created_at: ago(30), updated_at: ago(20), last_at: ago(20) },
+    { id: 't-2', kind: 'once', name: '整理本周交期变化', goal: '整理交期', state: 'active', stage: 'working', action: null,
+      question: null, thread: 'main', runs: 1, open_runs: 1, busy: 1, can_retry: false, created_at: ago(10),
+      updated_at: ago(5), last_at: ago(5) },
+    { id: 't-3', kind: 'once', name: '更新 BOM v3 的替代料', goal: '替代料', state: 'ended', stage: 'ended',
+      outcome: 'completed', question: null, thread: 'main', runs: 1, open_runs: 0, busy: 0, can_retry: false,
+      created_at: ago(200), updated_at: ago(190), last_at: ago(190) },
+    { id: 't-4', kind: 'once', name: 'R12 报价对比', goal: '列报价', state: 'ended', stage: 'ended', outcome: 'completed',
+      question: null, thread: 'main', runs: 1, open_runs: 0, busy: 0, can_retry: false, created_at: ago(100),
+      updated_at: ago(99), last_at: ago(99) },
+    { id: 't-9', kind: 'once', name: '数一下服务器', goal: '数服务器', state: 'ended', stage: 'ended', outcome: 'completed',
+      question: null, thread: 'main', runs: 1, open_runs: 0, busy: 0, can_retry: false, created_at: ago(50),
+      updated_at: ago(49), last_at: ago(49) },
   ];
   const ok = (data) => Promise.resolve({ ok: true, data });
-  const add = (thread, role, text, ticket = null) => {
-    const row = { id: nextId++, user: 'me', thread, role, text, ticket_id: ticket, at: now() };
+  const add = (project, role, text, ticket = null, meta = null, thread = 'main') => {
+    const row = { id: nextId++, user: 'me', thread, role, text, ticket_id: ticket, at: now(), meta, project };
     messages.push(row);
-    return row;
+    return { ...row };
   };
   const APPROVALS = { ask: '每条命令都先问你', read: '只读命令直接执行，改动先问你', auto: '直接执行' };
   const sshHosts = [
@@ -30,22 +46,30 @@
   const steps = [];
   const approvals = {};
   let nextStep = 1;
-  const step = (thread, ticket, key, name, input, status, output = '') => {
+  const step = (project, ticket, key, name, input, status, output = '') => {
     let row = steps.find((x) => x.ticket_id === ticket && x.key === key);
     if (!row) {
-      row = { id: nextStep++, user: 'me', thread, ticket_id: ticket, key, name, input, at: now() };
+      row = { id: nextStep++, user: 'me', thread: 'main', ticket_id: ticket, key, name, input, at: now(), project };
       steps.push(row);
     }
     Object.assign(row, { status, output, ended_at: status === 'running' ? null : now() });
     return { ...row };
   };
-  add('main', 'user', '帮我核对一下 Laser Control Board 的供应商报价');
-  add('main', 'acknowledgement', '收到，开始处理：核对 Laser Control Board 的供应商报价', 't-1');
-  // A conversation made to be too wide: long commands, a wide table, code, a long URL.
-  add('wide', 'user', '我现在能看到多少台服务器？', 't-9');
-  step('wide', 't-9', 'w1', 'shell', 'hostname; whoami; cat /etc/hosts 2>/dev/null; echo "---"; env | grep -i -E "server|host|ssh|inventory" 2>/dev/null | head -20; ls -la ~/.ssh ~/.aws ~/.kube /etc/ssh 2>&1', 'done', '[exit code 0]\n' + 'x'.repeat(400));
-  step('wide', 't-9', 'w2', 'shell', 'echo "HOME=$HOME"\nls -la $HOME 2>&1 | head\necho "=== aws config"; ls -la $HOME/.aws 2>&1', 'done', '[exit code 0]\nok');
-  add('wide', 'reply', [
+  add(null, 'user', '帮我核对一下 Laser Control Board 的供应商报价');
+  add('t-1', 'acknowledgement', '收到，开始处理：核对 Laser Control Board 的供应商报价', 't-1');
+  step('t-1', 't-1', 'k1', 'think', '4', 'done', '先把三家的报价单读进来，按料号对齐，再比单价和封装。');
+  step('t-1', 't-1', 'k2', 'read_file', 'quotes/vendor_a.csv', 'done', 'part,package,price\nR12,0402,0.012\n…');
+  step('t-1', 't-1', 'k3', 'shell', 'python3 compare.py quotes/', 'done', '[exit code 0]\n4 differences found');
+  add('ops1', 'reminder', '记得看巡检结果', null, { project: 'ops1', project_name: '服务器巡检' });
+  add('ops1', 'scheduled', '【定时任务】检查磁盘', null, { project: 'ops1', project_name: '服务器巡检' }, 'p-ops1');
+  add('ops1', 'reply', '10 台服务器磁盘都在 80% 以下，最高 parts-scraper 67%。', 'r-1', null, 'p-ops1');
+  add(null, 'user', '列一下 R12 的两家报价');
+  add('t-4', 'reply', '#### R12 报价对比\n| 供应商 | 封装 | 单价 |\n|---|---|---|\n| 甲 | 0402 | **0.012** |\n| 乙 | 0603 | 0.010 |\n- 差价 12%\n- <b>未</b>含运费', 't-4');
+  // A project made to be too wide: long commands, a wide table, code, a long URL.
+  add(null, 'user', '我现在能看到多少台服务器？');
+  step('t-9', 't-9', 'w1', 'shell', 'hostname; whoami; cat /etc/hosts 2>/dev/null; echo "---"; env | grep -i -E "server|host|ssh|inventory" 2>/dev/null | head -20; ls -la ~/.ssh ~/.aws ~/.kube /etc/ssh 2>&1', 'done', '[exit code 0]\n' + 'x'.repeat(400));
+  step('t-9', 't-9', 'w2', 'shell', 'echo "HOME=$HOME"\nls -la $HOME 2>&1 | head\necho "=== aws config"; ls -la $HOME/.aws 2>&1', 'done', '[exit code 0]\nok');
+  add('t-9', 'reply', [
     '#### 结果', '我这边看不到任何外部服务器，只有 1 台：**ip-172-31-14-189.eu-west-2.compute.internal**，*AWS EC2*。',
     '详见 https://ai-api.yuxianglin.xyz/api/v1/very/long/path/that/keeps/going/and/going/without/any/break/at/all/0123456789 。',
     '[文档](https://example.com/docs)', '> 这是引用，<script>alert(1)</script> 不会执行', '---',
@@ -54,17 +78,27 @@
     '```bash', 'for h in $(cat hosts); do ssh -o BatchMode=yes -o ConnectTimeout=5 "$h" hostname || echo "$h unreachable"; done # ' + 'x'.repeat(120), '```',
     '1. 第一', '2. 第二',
   ].join('\n'), 't-9');
-  step('main', 't-1', 'k1', 'think', '4', 'done', '先把三家的报价单读进来，按料号对齐，再比单价和封装。');
-  step('main', 't-1', 'k2', 'read_file', 'quotes/vendor_a.csv', 'done', 'part,package,price\nR12,0402,0.012\n…');
-  step('main', 't-1', 'k3', 'shell', 'python3 compare.py quotes/', 'done', '[exit code 0]\n4 differences found');
-  add('bom', 'user', '列一下 R12 的两家报价');
-  add('bom', 'reply', '#### R12 报价对比\n| 供应商 | 封装 | 单价 |\n|---|---|---|\n| 甲 | 0402 | **0.012** |\n| 乙 | 0603 | 0.010 |\n- 差价 12%\n- <b>未</b>含运费');
+
+  // A new request becomes a one-off project once the assistant takes it up.
+  const opened = (ticket, name) => {
+    if (!projects.some((p) => p.id === ticket)) {
+      projects.unshift({ id: ticket, kind: 'once', name, goal: name, state: 'active', stage: 'working', action: null,
+        question: null, thread: 'main', runs: 1, open_runs: 1, busy: 1, can_retry: false, created_at: now(),
+        updated_at: now(), last_at: now() });
+      fire('event', { type: 'ticket', ticket: { id: ticket, stage: 'working' } });
+    }
+  };
+  const closed = (ticket) => {
+    const p = projects.find((x) => x.id === ticket);
+    if (p && p.kind === 'once') Object.assign(p, { state: 'ended', stage: 'ended', outcome: 'completed', busy: 0, open_runs: 0 });
+    fire('event', { type: 'ticket', ticket: { id: ticket, stage: 'ended' } });
+  };
 
   // A test can hold a turn at its steps (`hold`), then let it go on one step at a time (`release()`).
   // A release that comes before the turn reaches its pause is kept, so the turn goes straight on.
   let held = null;
   let released = 0;
-  window.__fake = { fire, messages, tickets, steps, hold: false, release: () => {
+  window.__fake = { fire, messages, projects, steps, hold: false, release: () => {
     if (held) held(); else released++;
     held = null;
   } };
@@ -80,14 +114,36 @@
       return ok({ user: 'me' });
     },
     logout: () => { configured = false; return ok(true); },
-    threads: () => ok([...new Set(messages.map((m) => m.thread).reverse())].map((thread) => ({ thread }))),
-    history: (thread, after) => ok(messages.filter((m) => m.thread === thread && m.id > after)),
+    everything: (after) => ok(messages.filter((m) => m.id > after).map((m) => ({ ...m }))),
+    allSteps: () => ok(steps.map((x) => ({ ...x }))),
+    projects: () => ok(projects.map((p) => ({ ...p }))),
+    setTimezone: (timezone) => { window.__fake.timezone = timezone; return ok({ timezone }); },
+    projectAction: (id, action) => {
+      const p = projects.find((x) => x.id === id);
+      if (!p) return Promise.resolve({ ok: false, status: 404, error: '没有这个项目' });
+      const to = { confirm: 'active', refuse: 'refused', pause: 'paused', resume: 'active', end: 'ended' }[action];
+      p.state = to;
+      p.next_at = to === 'active' ? ago(-600) : null;
+      for (const m of messages) {
+        if (m.role === 'proposal' && m.meta && m.meta.project === id) {
+          m.meta = { ...m.meta, state: to };
+          setTimeout(() => fire('event', { type: 'message-updated', message: { ...m } }), 5);
+        }
+      }
+      if (action === 'confirm') {
+        setTimeout(() => fire('event', { type: 'message', message: add(id, 'notice', `项目「${p.name}」开始了，下一次在明天 09:00。`,
+          null, { project: id, project_name: p.name }) }), 10);
+      }
+      return ok({ ...p });
+    },
     post: (thread, text) => {
-      const row = add(thread, 'user', text);
+      const project = thread.startsWith('p-') ? thread.slice(2) : null;
+      const row = add(project, 'user', text, null, project ? { project, project_name: (projects.find((p) => p.id === project) || {}).name } : null, thread);
       // A turn as the server streams it: acknowledged, thinking, a command run, the answer written as it comes.
-      const ticket = `t-${row.id}`;
+      const ticket = project ? `r-${row.id}` : `t-${row.id}`;
+      const owner = project || ticket;
       const answer = `已处理「${text}」\n- 交期变化 **2** 处\n- 已写入 \`/work/report.md\``;
-      const live = (event) => fire('event', { ...event, ticket_id: ticket, thread });
+      const live = (event) => fire('event', { ...event, ticket_id: ticket, thread, project: owner });
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       // Held, the turn stops while the command runs and again while the answer is half written, until released.
       const pause = () => {
@@ -95,31 +151,53 @@
         if (released) { released--; return Promise.resolve(); }
         return new Promise((resolve) => { held = resolve; });
       };
+      const ack = () => {
+        if (!project) opened(ticket, text.slice(0, 20));
+        fire('event', { type: 'message', message: add(owner, 'acknowledgement', `收到，开始处理：${text}`, ticket, null, thread) });
+      };
+      if (text.includes('每天')) {
+        // Something to do for a long time: the assistant proposes a project for the person to confirm.
+        (async () => {
+          await wait(30);
+          ack();
+          projects.unshift({ id: 'new1', kind: 'ongoing', name: '每日交期提醒', goal: '每天提醒看交期',
+            charter: '只提醒，不改任何东西', state: 'proposed', thread: 'p-new1',
+            schedules: [{ id: 's9', action: 'remind', text: '看一下今天的交期', text_when: '每天 09:00（Asia/Shanghai）' }],
+            next_at: null, runs: 0, open_runs: 0, busy: 0, question: null, created_at: now(), updated_at: now(),
+            last_at: now() });
+          fire('event', { type: 'message', message: add('new1', 'proposal', '提议一个长期项目：每日交期提醒', ticket,
+            { project: 'new1', project_name: '每日交期提醒', state: 'proposed' }) });
+          fire('event', { type: 'message', message: add(owner, 'reply', '提议了「每日交期提醒」，请确认。', ticket) });
+          closed(ticket);
+          live({ type: 'idle' });
+        })();
+        return ok(row);
+      }
       if (text.includes('重启')) {
         // A command on a server that waits for the person's approval, then runs (or does not).
         (async () => {
           await wait(30);
-          fire('event', { type: 'message', message: add(thread, 'acknowledgement', `收到，开始处理：${text}`, ticket) });
+          ack();
           const input = 'web  $ systemctl restart nginx';
-          fire('event', { type: 'step', step: step(thread, ticket, 'r', 'ssh', input, 'approval', 'nginx 没在跑，重启一下') });
+          fire('event', { type: 'step', step: step(owner, ticket, 'r', 'ssh', input, 'approval', 'nginx 没在跑，重启一下') });
           const approve = await new Promise((resolve) => { approvals[`${ticket}:r`] = resolve; });
-          fire('event', { type: 'step', step: step(thread, ticket, 'r', 'ssh', input, approve ? 'done' : 'error',
+          fire('event', { type: 'step', step: step(owner, ticket, 'r', 'ssh', input, approve ? 'done' : 'error',
             approve ? '[exit code 0]\n' : '人拒绝了这条命令') });
-          fire('event', { type: 'message', message: add(thread, 'reply', approve ? '已重启 nginx。' : '你拒绝了，没有重启。', ticket) });
+          fire('event', { type: 'message', message: add(owner, 'reply', approve ? '已重启 nginx。' : '你拒绝了，没有重启。', ticket, null, thread) });
           live({ type: 'idle' });
         })();
         return ok(row);
       }
       (async () => {
         await wait(30);
-        fire('event', { type: 'message', message: add(thread, 'acknowledgement', `收到，开始处理：${text}`, ticket) });
+        ack();
         live({ type: 'thinking' });
         await wait(90);
-        fire('event', { type: 'step', step: step(thread, ticket, 'a', 'shell', 'ls /work', 'running') });
+        fire('event', { type: 'step', step: step(owner, ticket, 'a', 'shell', 'ls /work', 'running') });
         await wait(140);
         await pause();
         fire('event', { type: 'step',
-          step: step(thread, ticket, 'a', 'shell', 'ls /work', 'done', '[exit code 0]\nbom.csv\nleadtimes.csv') });
+          step: step(owner, ticket, 'a', 'shell', 'ls /work', 'done', '[exit code 0]\nbom.csv\nleadtimes.csv') });
         live({ type: 'thinking' });
         await wait(60);
         for (let n = 4; n < answer.length + 4; n += 4) {
@@ -127,12 +205,11 @@
           await wait(25);
         }
         await pause();
-        fire('event', { type: 'message', message: add(thread, 'reply', answer, ticket) });
+        fire('event', { type: 'message', message: add(owner, 'reply', answer, ticket, null, thread) });
         live({ type: 'idle' });
       })();
       return ok(row);
     },
-    steps: (thread) => ok(steps.filter((x) => x.thread === thread).map((x) => ({ ...x }))),
     approve: (ticketId, key, approve) => {
       const resolve = approvals[`${ticketId}:${key}`];
       if (!resolve) return Promise.resolve({ ok: false, status: 404, error: '这条命令已经不在等批准了' });
@@ -161,7 +238,6 @@
         ],
       });
     },
-    tickets: () => ok(tickets),
     // SSH servers, as an admin sees them; a host whose address starts with 10. times out, as from another cloud.
     ssh: () => ok({ admin: true, public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAvfSbnyut continuum@ai-api.yuxianglin.xyz',
       fingerprint: 'SHA256:PJAca3IkzE4nJ7pqzN49pMQAw37wQF02BDE1ofh2Hjc', hosts: sshHosts.map((h) => ({ ...h })),
@@ -190,11 +266,11 @@
       resolve({ ok: true, data: { ...h, seconds: 0.4 } });
     }, 150)),
     stop: (id) => {
-      const t = tickets.find((x) => x.id === id);
-      Object.assign(t, { stage: 'ended', action: null, outcome: 'stopped', question: null });
-      return ok(t);
+      const p = projects.find((x) => x.id === id);
+      Object.assign(p, { state: 'ended', stage: 'ended', outcome: 'stopped', question: null, busy: 0 });
+      return ok({ id, stage: 'ended', outcome: 'stopped' });
     },
-    retry: (id) => ok(tickets.find((x) => x.id === id)),
+    retry: (id) => ok({ id }),
     minimize: () => {},
     hide: () => {},
     maximize: () => {},

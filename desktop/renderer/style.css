@@ -395,3 +395,37 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
   .who .avatar.sm { display: none; }
 }
 .stats.tools { grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); }
+
+/* --- projects in the sidebar --- */
+.thread-list .side-head { padding: 12px 14px 4px; font-size: 11px; letter-spacing: 0.12em; color: var(--dim); }
+.thread-list .side-head.toggle button { border: 0; background: none; color: var(--dim); font-size: 11px; letter-spacing: 0.08em; padding: 0; cursor: pointer; }
+.thread-list .side-head.toggle button:hover { color: var(--teal); }
+.thread-list button .side-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-list button .side-note { flex: none; min-width: 16px; height: 16px; padding: 0 4px; font-size: 10.5px; line-height: 16px; text-align: center; background: var(--amber); color: #1d1103; font-weight: 700; }
+
+/* --- the one conversation: what each message belongs to, and what the assistant says on its own --- */
+.msg .meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.msg.user .meta { justify-content: flex-end; }
+.project-chip { border: 1px solid var(--line-2); background: transparent; color: var(--dim); font-size: 11px; padding: 0 6px; height: 18px; line-height: 16px; cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-chip:hover { color: var(--teal); border-color: var(--teal-line); }
+.msg.reminder, .msg.scheduled, .msg.notice { grid-template-columns: 30px minmax(0, 1fr); }
+.msg.reminder .bubble, .msg.scheduled .bubble, .msg.notice .bubble { grid-column: 2; padding: 4px 0 0; background: none; border: 0; }
+.msg.reminder .bubble { display: flex; gap: 8px; align-items: flex-start; color: var(--amber); font-weight: 600; }
+.msg.scheduled .bubble { display: flex; gap: 8px; align-items: flex-start; color: var(--soft); }
+.msg.reminder .bubble .i, .msg.scheduled .bubble .i { width: 16px; height: 16px; flex: none; margin-top: 3px; }
+.msg.notice .bubble { color: var(--dim); font-size: 12.5px; }
+.msg.reminder .meta, .msg.scheduled .meta, .msg.notice .meta { grid-column: 2; }
+.msg.scheduled .avatar { opacity: 0.5; }
+.msg.proposal { grid-template-columns: 30px minmax(0, 1fr); }
+.msg.proposal .meta { grid-column: 2; }
+.proposal-card { grid-column: 2; border: 1px solid var(--amber-line); background: rgba(242, 163, 58, 0.06); padding: 12px 14px; display: grid; gap: 8px; min-width: 0; }
+.proposal-head { display: flex; align-items: center; gap: 8px; color: var(--amber); font-weight: 700; }
+.proposal-head .i { width: 16px; height: 16px; flex: none; }
+.proposal-card .detail dd { white-space: pre-line; }
+.proposal-card .actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+.proposal-card .decided { color: var(--teal); font-size: 12.5px; }
+.proposal-card .decided.refused { color: var(--dim); }
+.card.project .detail dd { white-space: pre-line; }
+.thread-list { overflow-x: hidden; grid-template-columns: minmax(0, 1fr); }
+.thread-list li { min-width: 0; }
+.thread-list button { width: 100%; min-width: 0; }

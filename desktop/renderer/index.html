@@ -589,7 +589,7 @@ l-33 -150 -4 -901 -3 -902 25 -28 24 -29 291 0 c277 0 291 1 310 20 20 20 20
         <nav class="tabs" role="tablist">
           <button id="tab-chat" role="tab" aria-selected="true" data-view="chat"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>对话</button>
           <span class="tab-sep" aria-hidden="true"></span>
-          <button id="tab-tickets" role="tab" aria-selected="false" data-view="tickets"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="m3 13 9 5 9-5"/></svg>工单<span id="badge" class="badge" hidden></span></button>
+          <button id="tab-projects" role="tab" aria-selected="false" data-view="projects"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="m3 13 9 5 9-5"/></svg>项目<span id="badge" class="badge" hidden></span></button>
           <span class="tab-sep" aria-hidden="true"></span>
           <button id="tab-workers" role="tab" aria-selected="false" data-view="workers"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>Worker<span id="busy" class="badge teal" hidden></span></button>
         </nav>
@@ -604,16 +604,15 @@ l-33 -150 -4 -901 -3 -902 25 -28 24 -29 291 0 c277 0 291 1 310 20 20 20 20
 
       <div id="view-chat" class="view chat">
         <aside class="channels">
-          <div class="channels-head"><span>频道</span><span class="en" aria-hidden="true">CHANNELS</span>
-            <button id="new-thread" class="icon-btn" title="新对话" aria-label="新对话"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></div>
-          <ul id="threads" class="thread-list" role="listbox" aria-label="对话"></ul>
+          <div class="channels-head"><span>项目</span><span class="en" aria-hidden="true">PROJECTS</span></div>
+          <ul id="threads" class="thread-list" role="listbox" aria-label="项目"></ul>
         </aside>
         <div class="conversation">
           <div class="conv-head"><h2 id="thread-title">主对话</h2><span id="thread-no" class="thread-no" aria-hidden="true">#001</span></div>
           <ol id="messages" class="messages" aria-live="polite"></ol>
           <div id="empty-chat" class="empty" hidden>
             <span class="en" aria-hidden="true">NO MESSAGES YET</span>
-            <p>交代一件事，比如“帮我核对这版 BOM 的供应商报价”。</p>
+            <p>交代一件事，比如“帮我核对这版 BOM 的供应商报价”，或者“以后每天早上检查一下服务器磁盘”。</p>
           </div>
           <form id="composer" class="composer">
             <label for="input" class="sr">消息</label>
@@ -623,12 +622,12 @@ l-33 -150 -4 -901 -3 -902 25 -28 24 -29 291 0 c277 0 291 1 310 20 20 20 20
         </div>
       </div>
 
-      <div id="view-tickets" class="view tickets" hidden>
-        <div class="tickets-head"><h2 class="section-head"><span class="slash" aria-hidden="true">//</span><span class="en" aria-hidden="true">TICKETS</span>工单</h2></div>
-        <div id="tickets"></div>
-        <div id="empty-tickets" class="empty" hidden>
-          <span class="en" aria-hidden="true">NO TICKETS YET</span>
-          <p>还没有工单。在对话里交代一件事，接下来就会出现在这里。</p>
+      <div id="view-projects" class="view tickets projects" hidden>
+        <div class="tickets-head"><h2 class="section-head"><span class="slash" aria-hidden="true">//</span><span class="en" aria-hidden="true">PROJECTS</span>项目</h2></div>
+        <div id="projects"></div>
+        <div id="empty-projects" class="empty" hidden>
+          <span class="en" aria-hidden="true">NO PROJECTS YET</span>
+          <p>还没有项目。在对话里交代一件事，它就会出现在这里；要长期做的事，助理会提议一个长期项目给你确认。</p>
         </div>
       </div>
 

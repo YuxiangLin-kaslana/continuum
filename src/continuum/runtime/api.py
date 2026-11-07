@@ -10,6 +10,7 @@ import asyncio
 import re
 import time
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field, ValidationError
@@ -18,6 +19,7 @@ from continuum.core.errors import UserError
 from continuum.core.model import ActorRef, Ticket
 from continuum.core.stage import can_retry, ticket_stage
 
+from .projects import project_of_thread
 from .ssh import APPROVALS, Host
 
 if TYPE_CHECKING:
@@ -34,6 +36,10 @@ class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=200)
     device: str = Field(default="", max_length=80)
+
+
+class TimezoneRequest(BaseModel):
+    timezone: str = Field(min_length=1, max_length=64)
 
 
 class ApprovalRequest(BaseModel):
@@ -172,7 +178,16 @@ def create_app(rt: Runtime) -> FastAPI:
     @app.post("/api/v1/threads/{thread}/messages", status_code=201)
     async def post(thread: str, body: PostMessage, user: str = Depends(user_of)) -> dict[str, Any]:
         kind, ctx = source()
-        return kind.post(ctx, user, thread_name(thread), body.text)
+        project_id = project_of_thread(thread)
+        meta = None
+        if project_id:
+            # Talking to a project: still the one conversation, addressed to that project.
+            project = own_project(user, project_id)
+            if project.state not in ("active", "paused"):
+                raise HTTPException(409, "这个项目已经结束了")
+            meta = {"project": project.id, "project_name": project.name}
+        row = kind.post(ctx, user, thread_name(thread), body.text, meta=meta)
+        return {**row, "project": project_id}
 
     @app.get("/api/v1/tickets")
     async def tickets(open_only: bool = Query(default=False, alias="open"), user: str = Depends(user_of)) \
@@ -199,6 +214,101 @@ def create_app(rt: Runtime) -> FastAPI:
             return ticket_view(rt.engine.retry_ticket(ticket_id))
         except UserError as error:
             raise refused(error) from None
+
+    # --- the one conversation, and the projects it is about ---
+
+    def project_index(user: str) -> tuple[dict[str, Any], dict[str, str]]:
+        """The person's long-running projects by id, and each ticket's project (its own id for a one-off)."""
+        ongoing = {p.id: p for p in rt.projects.list(user)}
+        by_ticket: dict[str, str] = {}
+        for ticket in rt.store.tickets.list():
+            if not owns(user, ticket):
+                continue
+            threads = [c.address.get("thread") for c in ticket.channels]
+            project = next((project_of_thread(t) for t in threads if project_of_thread(t) in ongoing), None)
+            by_ticket[ticket.id] = project or ticket.id
+        return ongoing, by_ticket
+
+    def tag(message: dict[str, Any], by_ticket: dict[str, str]) -> dict[str, Any]:
+        meta = message.get("meta") or {}
+        project = meta.get("project") or project_of_thread(message.get("thread")) or (
+            by_ticket.get(message["ticket_id"]) if message.get("ticket_id") else None)
+        return {**message, "project": project}
+
+    @app.get("/api/v1/messages")
+    async def everything(after: int = 0, user: str = Depends(user_of)) -> list[dict[str, Any]]:
+        kind, ctx = source()
+        _, by_ticket = project_index(user)
+        return [tag(m, by_ticket) for m in kind.everything(ctx, user, after)]
+
+    @app.get("/api/v1/steps")
+    async def all_steps(user: str = Depends(user_of)) -> list[dict[str, Any]]:
+        kind, ctx = source()
+        _, by_ticket = project_index(user)
+        return [{**s, "project": by_ticket.get(s["ticket_id"], s["ticket_id"])} for s in kind.steps(ctx, user, None,
+                                                                                                    limit=600)]
+
+    @app.put("/api/v1/me/timezone")
+    async def set_timezone(body: TimezoneRequest, user: str = Depends(user_of)) -> dict[str, Any]:
+        try:
+            ZoneInfo(body.timezone)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise HTTPException(422, "不认识这个时区") from None
+        rt.store.set(f"timezone:{user}", body.timezone)
+        return {"timezone": body.timezone}
+
+    @app.get("/api/v1/projects")
+    async def projects(user: str = Depends(user_of)) -> list[dict[str, Any]]:
+        ongoing, by_ticket = project_index(user)
+        tickets = {t.id: t for t in rt.store.tickets.list() if t.id in by_ticket}
+        out = []
+        for project in ongoing.values():
+            if project.state == "refused":
+                continue
+            runs = [tickets[t] for t, p in by_ticket.items() if p == project.id and t in tickets]
+            busy = sum(1 for t in runs if (s := rt.executor.sessions.get(t.id)) is not None and s.busy)
+            waiting = [t for t in runs if ticket_stage(t).stage == "person"]
+            nexts = [s.next_at for s in project.schedules if s.next_at]
+            out.append({**rt.projects.view(project), "runs": len(runs), "open_runs": sum(1 for t in runs if t.ended is None),
+                        "busy": busy, "question": waiting[0].attention.question if waiting and waiting[0].attention else None,
+                        "next_at": min(nexts).isoformat() if nexts and project.state == "active" else None,
+                        "last_at": max((t.updated_at for t in runs), default=project.updated_at).isoformat()})
+        for ticket_id, project_id in by_ticket.items():
+            if project_id != ticket_id:
+                continue
+            ticket = tickets[ticket_id]
+            view = ticket_view(ticket)
+            session = rt.executor.sessions.get(ticket.id)
+            state = "ended" if ticket.ended else ("waiting" if view["stage"] == "person" else "active")
+            out.append({"id": ticket.id, "kind": "once", "name": ticket.title, "goal": ticket.mandate.scope,
+                        "state": state, "outcome": view["outcome"], "question": view["question"],
+                        "thread": view["thread"], "runs": len(ticket.assignments), "open_runs": int(ticket.ended is None),
+                        "busy": int(bool(session and session.busy)), "created_at": view["created_at"],
+                        "updated_at": view["updated_at"], "last_at": view["updated_at"], "next_at": None,
+                        "can_retry": view["can_retry"], "stage": view["stage"], "action": view["action"]})
+        out.sort(key=lambda p: p["last_at"], reverse=True)
+        return out
+
+    def own_project(user: str, project_id: str) -> Any:
+        project = rt.projects.get(project_id)
+        if project is None or project.owner != user:
+            raise HTTPException(404, "没有这个项目")
+        return project
+
+    @app.post("/api/v1/projects/{project_id}/{action}")
+    async def project_action(project_id: str, action: str, user: str = Depends(user_of)) -> dict[str, Any]:
+        own_project(user, project_id)
+        try:
+            if action in ("confirm", "refuse"):
+                project = rt.projects.decide(project_id, action == "confirm")
+                rt.announce_decision(project)
+            elif action in ("pause", "resume", "end"):
+                project = rt.projects.set_state(project_id, {"pause": "paused", "resume": "active", "end": "ended"}[action])
+            else:
+                raise HTTPException(404, "没有这个操作")
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from None
+        return rt.projects.view(project)
 
     # --- workers: how many run, on what, and what they have used ---
 
@@ -319,6 +429,16 @@ def create_app(rt: Runtime) -> FastAPI:
                 if event.get("type") == "closing":
                     await socket.close(code=1001)
                     return
+                if event.get("type") in ("stream", "thinking", "idle") and event.get("ticket_id"):
+                    _, by_ticket = project_index(user)
+                    event = {**event, "project": by_ticket.get(event["ticket_id"], event["ticket_id"])}
+                if event.get("type") in ("message", "message-updated", "step"):
+                    _, by_ticket = project_index(user)
+                    if event["type"] == "step":
+                        step = event["step"]
+                        event = {**event, "step": {**step, "project": by_ticket.get(step["ticket_id"], step["ticket_id"])}}
+                    else:
+                        event = {**event, "message": tag(event["message"], by_ticket)}
                 if event.get("type") == "ticket":
                     current = rt.store.tickets.get(event["id"])
                     if current is None or not owns(user, current):

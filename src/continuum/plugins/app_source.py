@@ -8,6 +8,7 @@ user's open streams.
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,7 +31,13 @@ CREATE TABLE IF NOT EXISTS steps (
 CREATE INDEX IF NOT EXISTS steps_thread ON steps (user, thread, id);
 """
 STEP_COLUMNS = ("id", "user", "thread", "ticket_id", "key", "name", "input", "output", "status", "at", "ended_at")
-COLUMNS = ("id", "user", "thread", "role", "text", "message_id", "reply_to", "ticket_id", "at")
+COLUMNS = ("id", "user", "thread", "role", "text", "message_id", "reply_to", "ticket_id", "at", "meta")
+
+
+def _message(row: Any) -> dict[str, Any]:
+    message = dict(zip(COLUMNS, row, strict=True))
+    message["meta"] = json.loads(message["meta"]) if message.get("meta") else None
+    return message
 
 
 class AppConfig(BaseModel):
@@ -59,12 +66,15 @@ class AppSource:
             db = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
             db.execute("PRAGMA journal_mode = WAL")
             db.executescript(SCHEMA)
+            # Added after the first release: what a message is besides its text, such as the project it belongs to.
+            if "meta" not in {r[1] for r in db.execute("PRAGMA table_info(messages)")}:
+                db.execute("ALTER TABLE messages ADD COLUMN meta TEXT")
             self._dbs[path] = db
         return self._dbs[path]
 
     def _row(self, ctx: Any, row_id: int) -> dict[str, Any]:
         row = self._db(ctx).execute(f"SELECT {', '.join(COLUMNS)} FROM messages WHERE id = ?", (row_id,)).fetchone()
-        return dict(zip(COLUMNS, row, strict=True))
+        return _message(row)
 
     # --- the SourceKind protocol ---
 
@@ -91,12 +101,15 @@ class AppSource:
 
     # --- called by the API ---
 
-    def post(self, ctx: Any, user: str, thread: str, text: str) -> dict[str, Any]:
-        """A person's message in their conversation: stored, shown on their other devices, handed to the Engine."""
+    def post(self, ctx: Any, user: str, thread: str, text: str, role: str = "user",
+             meta: dict[str, Any] | None = None) -> dict[str, Any]:
+        """A person's message in their conversation: stored, shown on their other devices, handed to the Engine.
+        A project's scheduled run arrives the same way, as `scheduled`: the person asked for it when they confirmed
+        the project."""
         at = datetime.now(UTC)
         cursor = self._db(ctx).execute(
-            "INSERT INTO messages (user, thread, role, text, at) VALUES (?, ?, 'user', ?, ?)",
-            (user, thread, text, at.isoformat()))
+            "INSERT INTO messages (user, thread, role, text, at, meta) VALUES (?, ?, ?, ?, ?, ?)",
+            (user, thread, role, text, at.isoformat(), json.dumps(meta, ensure_ascii=False) if meta else None))
         row_id = int(cursor.lastrowid or 0)
         ref = ThreadRef(source=ctx.instance, id=thread_id(user, thread))
         ctx.receive(Trigger(
@@ -112,13 +125,48 @@ class AppSource:
         rows = self._db(ctx).execute(
             f"SELECT {', '.join(COLUMNS)} FROM messages WHERE user = ? AND thread = ? AND id > ? ORDER BY id LIMIT ?",
             (user, thread, after, limit)).fetchall()
-        return [dict(zip(COLUMNS, row, strict=True)) for row in rows]
+        return [_message(row) for row in rows]
 
-    def steps(self, ctx: Any, user: str, thread: str, limit: int = 300) -> list[dict[str, Any]]:
-        """The latest steps the workers took in a conversation, oldest first."""
-        rows = self._db(ctx).execute(
-            f"SELECT {', '.join(STEP_COLUMNS)} FROM steps WHERE user = ? AND thread = ? ORDER BY id DESC LIMIT ?",
-            (user, thread, limit)).fetchall()
+    def everything(self, ctx: Any, user: str, after: int = 0, limit: int = 500) -> list[dict[str, Any]]:
+        """The person's one conversation: every message of theirs, whatever it belongs to, oldest first."""
+        if after:
+            rows = self._db(ctx).execute(
+                f"SELECT {', '.join(COLUMNS)} FROM messages WHERE user = ? AND id > ? ORDER BY id LIMIT ?",
+                (user, after, limit)).fetchall()
+        else:
+            rows = list(reversed(self._db(ctx).execute(
+                f"SELECT {', '.join(COLUMNS)} FROM messages WHERE user = ? ORDER BY id DESC LIMIT ?",
+                (user, limit)).fetchall()))
+        return [_message(row) for row in rows]
+
+    def say(self, ctx: Any, user: str, thread: str, role: str, text: str, meta: dict[str, Any] | None = None,
+            ticket_id: str | None = None) -> dict[str, Any]:
+        """Something the assistant says on its own, such as a reminder or a project to confirm: kept and shown."""
+        cursor = self._db(ctx).execute(
+            "INSERT INTO messages (user, thread, role, text, ticket_id, at, meta) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user, thread, role, text, ticket_id, datetime.now(UTC).isoformat(),
+             json.dumps(meta, ensure_ascii=False) if meta else None))
+        row = self._row(ctx, int(cursor.lastrowid or 0))
+        self.publish(user, {"type": "message", "message": row})
+        return row
+
+    def update_meta(self, ctx: Any, row_id: int, meta: dict[str, Any]) -> dict[str, Any]:
+        self._db(ctx).execute("UPDATE messages SET meta = ? WHERE id = ?", (json.dumps(meta, ensure_ascii=False),
+                                                                           row_id))
+        row = self._row(ctx, row_id)
+        self.publish(row["user"], {"type": "message-updated", "message": row})
+        return row
+
+    def steps(self, ctx: Any, user: str, thread: str | None, limit: int = 300) -> list[dict[str, Any]]:
+        """The latest steps the workers took in a conversation (or in all of the person's), oldest first."""
+        if thread is None:
+            rows = self._db(ctx).execute(
+                f"SELECT {', '.join(STEP_COLUMNS)} FROM steps WHERE user = ? ORDER BY id DESC LIMIT ?",
+                (user, limit)).fetchall()
+        else:
+            rows = self._db(ctx).execute(
+                f"SELECT {', '.join(STEP_COLUMNS)} FROM steps WHERE user = ? AND thread = ? ORDER BY id DESC LIMIT ?",
+                (user, thread, limit)).fetchall()
         return [dict(zip(STEP_COLUMNS, row, strict=True)) for row in reversed(rows)]
 
     def step_counts(self, ctx: Any, user: str) -> dict[str, dict[str, int]]:

@@ -12,6 +12,7 @@ import json
 import logging
 import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from continuum.models import ChatModel, ModelError, partial_string, tool, tool_c
 from continuum.plugin import ExecutorContext
 
 from continuum.runtime import ssh as ssh_rules
+from continuum.runtime.projects import zone
 
 from . import cli_agents, sandbox
 from .cli_agents import ClaudeCodeConfig, CodexConfig
@@ -93,6 +95,32 @@ SSH_RULES = """
 先用 ssh_hosts 看清单。尽量用只读命令；会改东西的命令（重启、改文件、装包、删除）只在请求需要时用，reason 写清楚，
 人批准后才会执行；被拒绝就不要换个写法再试，向人说明。不要读取或输出私钥、密码等机密。
 """
+# A long-running project: offered when the host keeps projects. The person confirms it before it does anything.
+SCHEDULE = {"type": "object", "properties": {
+    "action": {"type": "string", "enum": ["remind", "run"],
+               "description": "remind=在对话里提醒人（不需要干活）；run=定时开一次运行去干活"},
+    "text": {"type": "string", "description": "提醒的话，或这次运行要做的事"},
+    "every": {"type": "string", "enum": ["once", "minutes", "hours", "day", "week", "month"]},
+    "interval": {"type": "integer", "description": "每隔几个 every，默认 1；minutes 至少 5"},
+    "at": {"type": "string", "description": "HH:MM，人的时区；用于 day/week/month"},
+    "weekday": {"type": "integer", "description": "1=周一 … 7=周日；用于 week"},
+    "day": {"type": "integer", "description": "1-28；用于 month"},
+    "once_at": {"type": "string", "description": "YYYY-MM-DD HH:MM，人的时区；用于 once"}},
+    "required": ["action", "text", "every"]}
+PROJECT_TOOLS = [
+    tool("propose_project",
+         "提议一个长期项目：人要你长期做某事、定期检查、或到时提醒时用。人确认后它才生效，之后按 schedules 自动提醒或开工。"
+         "charter 写清它可以自己做什么、不能做什么（这是人给的长期授权，写窄不写宽）。",
+         {"name": {"type": "string", "description": "十几个字以内"}, "goal": {"type": "string"},
+          "charter": {"type": "string"}, "schedules": {"type": "array", "items": SCHEDULE},
+          "ends_at": {"type": "string", "description": "可选，YYYY-MM-DD，到这天结束"}},
+         required=["name", "goal", "charter", "schedules"]),
+]
+PROJECT_RULES = """
+人要你长期做某件事、定期检查、或到时间提醒他时，用 propose_project 提议一个长期项目（人的时区：{tz}，现在是 {now}）。
+提议后它还没生效，要等人在对话里确认；你就 report(state="ready")，summary 说清提议了什么、请他确认。
+"""
+
 APPROVAL_TIMEOUT = 30 * 60
 SSH_COMMAND_TIMEOUT = 300
 
@@ -208,14 +236,21 @@ class AgentExecutor:
         model: ChatModel | None = ctx.models.get(config.model)
         if model is None:
             raise LookupError(f"no model named {config.model!r}; add [models.{config.model}] to the settings")
-        path = transcript_path(job.workdir)
+        path = job.state_file(".agent.json") if hasattr(job, "state_file") else transcript_path(job.workdir)
         messages: list[dict[str, Any]] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
         delegates = config.delegates()
         job.ssh = _ssh_for(ctx, job)
-        tools = [*TOOLS, *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else [])]
+        job.projects = getattr(ctx, "projects", None)
+        tools = [*TOOLS, *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
+                 *(PROJECT_TOOLS if job.projects else [])]
         if not messages:
             system = SYSTEM + (DELEGATING.format(names="、".join(delegates)) if delegates else "")
             system += SSH_RULES if job.ssh else ""
+            if job.projects:
+                tz = job.projects.timezone_of(getattr(job, "requester", "")) if hasattr(job.projects, "timezone_of") \
+                    else "UTC"
+                local = datetime.now(UTC).astimezone(zone(tz))
+                system += PROJECT_RULES.format(tz=tz, now=local.strftime("%Y-%m-%d %H:%M %A"))
             system += f"\n团队的要求：\n{config.instructions}\n" if config.instructions else ""
             messages = [{"role": "system", "content": system}, {"role": "user", "content": job.assignment}]
         job.workdir.mkdir(parents=True, exist_ok=True)
@@ -347,6 +382,16 @@ class AgentExecutor:
                 answer = await cli_agents.delegate(name, delegate_config, job, str(args.get("task", "")),
                                                    bool(args.get("fresh")))
                 return answer if len(answer) <= 20000 else answer[:20000] + "\n...[后面截断]", False
+            if name == "propose_project":
+                projects = getattr(job, "projects", None)
+                if projects is None:
+                    return "错误：这里不能建项目", False
+                try:
+                    project = projects.propose_from(job, args)
+                except (ValueError, TypeError) as error:
+                    return f"错误：{error}", False
+                when = "；".join(s.describe(project.timezone) for s in project.schedules) or "没有定时安排"
+                return f"已提议项目「{project.name}」（{when}），等人在对话里确认后生效。", False
             if name == "ssh_hosts":
                 ssh = getattr(job, "ssh", None)
                 if ssh is None:

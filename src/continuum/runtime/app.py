@@ -10,6 +10,8 @@ import asyncio
 import fcntl
 import logging
 import os
+import time
+from datetime import UTC, datetime
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal
@@ -27,6 +29,7 @@ from continuum.policy.effects import policy_effects
 from continuum.policy.gate import RulePolicy
 
 from .accounts import Accounts
+from .projects import Projects, project_of_thread, zone
 from .ssh import SshHosts
 from .effects import Effects
 from .executor import InProcessExecutor
@@ -80,6 +83,8 @@ class Runtime:
             self.store = SQLiteStore(self.home / "continuum.db")
             self.accounts = Accounts(self.store)
             self.ssh = SshHosts(self.store, self.home, self.settings.ssh)
+            self.projects = Projects(self.store, self.home)
+            self._clock_at = 0.0
             self._wake = asyncio.Event()
             self.effects = Effects(self.store, on_enqueue=self.poke)
             self.sources = self._sources()
@@ -103,6 +108,9 @@ class Runtime:
             self.engine = Engine(EngineOptions(
                 repo=self.store, policy=lambda: self.policy, scope=self, assessor=self.router,
                 executor=self.executor, outbox=self.outbox, prepare_ticket=self.executor.prepare, emit=self._emit))
+            self.executor.project_for = self.project_for_ticket
+            self.executor.projects = self.projects
+            self.executor.context.projects = ProjectDesk(self)
             self.router.bind(self.engine)
             self.executor.bind(self.engine)
         except BaseException:
@@ -284,6 +292,64 @@ class Runtime:
             log.exception("evaluating failed")
             self._problem(f"evaluate: {type(error).__name__}: {error}")
         await self.effects.run_due(wait=False)
+        self._tick_projects()
+
+    # --- projects ---
+
+    def timezone_of(self, user: str) -> str:
+        return self.store.get(f"timezone:{user}") or "UTC"
+
+    def app_source(self) -> Any:
+        return next((c for c in self.sources.values() if c.kind.kind == "app"), None)
+
+    def _tick_projects(self) -> None:
+        """What the projects' schedules make due: a reminder in the person's conversation, or a run of the project."""
+        now = time.monotonic()
+        if now - self._clock_at < 5:
+            return
+        self._clock_at = now
+        ctx = self.app_source()
+        if ctx is None:
+            return
+        try:
+            due = self.projects.due(datetime.now(UTC))
+        except Exception as error:  # noqa: BLE001 - a bad project must not stop the host
+            log.exception("projects: schedules failed")
+            self._problem(f"projects: {type(error).__name__}: {error}")
+            return
+        for project, schedule in due:
+            meta = {"project": project.id, "project_name": project.name, "schedule": schedule.id}
+            if schedule.action == "remind":
+                ctx.kind.say(ctx, project.owner, "main", "reminder", schedule.text, meta)
+            else:
+                ctx.kind.post(ctx, project.owner, project.thread, f"【定时任务】{schedule.text}", role="scheduled",
+                              meta=meta)
+            log.info("project %s: %s %s", project.id, schedule.action, schedule.id)
+
+    def announce_decision(self, project: Any) -> None:
+        """Show the person's answer on the proposal in their conversation, and say what happens next."""
+        ctx = self.app_source()
+        if ctx is None:
+            return
+        for message in ctx.kind.everything(ctx, project.owner, limit=2000):
+            meta = message.get("meta") or {}
+            if message["role"] == "proposal" and meta.get("project") == project.id:
+                ctx.kind.update_meta(ctx, message["id"], {**meta, "state": project.state})
+        if project.state == "active":
+            nexts = [s.next_at for s in project.schedules if s.next_at]
+            when = f"，下一次在 {min(nexts).astimezone(zone(project.timezone)):%m-%d %H:%M}" if nexts else ""
+            ctx.kind.say(ctx, project.owner, "main", "notice", f"项目「{project.name}」开始了{when}。",
+                         {"project": project.id, "project_name": project.name})
+
+    def project_for_ticket(self, ticket: Any) -> Any:
+        """The long-running project a run belongs to, if any: the project whose thread the run answers on."""
+        for channel in ticket.channels:
+            project_id = project_of_thread(channel.address.get("thread"))
+            if project_id:
+                return self.projects.get(project_id)
+        origin = self.store.triggers.get(ticket.origin.trigger_id)
+        project_id = project_of_thread(origin.channel.address.get("thread")) if origin and origin.channel else None
+        return self.projects.get(project_id) if project_id else None
 
     async def serve_api(self) -> int:
         """Start the HTTP API on the configured address; returns the port it listens on."""
@@ -352,3 +418,37 @@ class Runtime:
         await self.executor.shutdown()
         self.store.close()
         self._release_lock()
+
+
+class ProjectDesk:
+    """What a worker may do with the person's projects: propose one, which the person then confirms or refuses."""
+
+    def __init__(self, rt: Runtime):
+        self.rt = rt
+
+    def timezone_of(self, user: str) -> str:
+        return self.rt.timezone_of(user)
+
+    def propose_from(self, job: Any, args: dict[str, Any]) -> Any:
+        owner = getattr(job, "requester", None)
+        ctx = self.rt.app_source()
+        if not owner or ctx is None:
+            raise ValueError("只有通过对话提的请求才能建项目")
+        timezone = self.rt.timezone_of(owner)
+        try:
+            project = self.rt.projects.propose(
+                owner, str(args.get("name", ""))[:80], str(args.get("goal", "")), str(args.get("charter", "")),
+                list(args.get("schedules") or []), timezone, proposed_by=job.ticket_id)
+        except ValidationError as error:
+            raise ValueError("；".join(e["msg"].removeprefix("Value error, ") for e in error.errors())) from None
+        if args.get("ends_at"):
+            try:
+                end = datetime.fromisoformat(str(args["ends_at"])).replace(tzinfo=zone(timezone))
+                project.ends_at = end.astimezone(UTC)
+                self.rt.projects._save(project)
+            except ValueError:
+                pass
+        ctx.kind.say(ctx, owner, "main", "proposal", f"提议一个长期项目：{project.name}",
+                     {"project": project.id, "project_name": project.name, "state": "proposed"},
+                     ticket_id=job.ticket_id)
+        return project

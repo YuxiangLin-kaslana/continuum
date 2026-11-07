@@ -395,7 +395,7 @@ class _CliAgentExecutor:
 
     async def turn(self, ctx: ExecutorContext, job) -> None:
         config = ctx.config
-        saved_path = state_path(job.workdir)
+        saved_path = job.state_file(".cli.json") if hasattr(job, "state_file") else state_path(job.workdir)
         saved = json.loads(saved_path.read_text(encoding="utf-8")) if saved_path.exists() else {}
         session = saved.get("session")
         inputs = [_describe(item) for item in await job.inputs()]
@@ -594,7 +594,7 @@ async def delegate(kind: str, config: CliAgentConfig, job: Any, task: str, fresh
     """Hand a worker's sub-task to Claude Code or Codex in the ticket's workspace; their steps show in the ticket, and
     their answer comes back as the tool's result. Within a ticket each goes on in its own session unless `fresh`."""
     executor = DELEGATES[kind]
-    path = tools_path(job.workdir)
+    path = job.state_file(".tools.json") if hasattr(job, "state_file") else tools_path(job.workdir)
     sessions = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     session = None if fresh else sessions.get(kind)
     run = await executor.run(config, job, task, session, TOOL_RULES, live=False)
