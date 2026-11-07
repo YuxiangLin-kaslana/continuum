@@ -268,6 +268,15 @@ def test_the_settings_page_adds_tests_and_removes_ssh_servers():
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-settings.png", full_page=True)
 
+        # One choice for every server, asked twice.
+        page.select_option("#ssh-bulk", "auto")
+        page.click("#ssh-bulk-apply")
+        assert page.inner_text("#ssh-bulk-apply") == "确认改 2 台？"
+        page.click("#ssh-bulk-apply")
+        page.wait_for_selector("#ssh-bulk-note:not([hidden])")
+        assert page.inner_text("#ssh-bulk-note") == "已把 2 台改为“直接执行”。"
+        assert page.locator(".card.host >> text=直接执行").count() == 2
+
         # A jump host in use is not removed; once nothing goes through it, it is (after a second click).
         page.click(".card.host[data-host=bastion] >> text=删除")
         page.click(".card.host[data-host=bastion] >> text=确认删除？")

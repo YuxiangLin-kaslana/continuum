@@ -214,6 +214,29 @@ def _ssh_for(ctx: Any, job: Any) -> Any:
     return ssh
 
 
+def _mend(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A transcript whose turn stopped part-way (the host restarted while tools ran) has tool calls without results,
+    which the model refuses. Each missing result is said plainly, so the worker knows to look again."""
+    out: list[dict[str, Any]] = []
+    i = 0
+    while i < len(messages):
+        message = messages[i]
+        out.append(message)
+        i += 1
+        if message.get("role") != "assistant" or not message.get("tool_calls"):
+            continue
+        answered = set()
+        while i < len(messages) and messages[i].get("role") == "tool":
+            answered.add(messages[i].get("tool_call_id"))
+            out.append(messages[i])
+            i += 1
+        for call in message["tool_calls"]:
+            if call.get("id") not in answered:
+                out.append({"role": "tool", "tool_call_id": call.get("id"),
+                            "content": "（这次调用被中断了：服务在它执行时重启，没有结果。需要的话重新执行。）"})
+    return out
+
+
 def _describe(item: Any) -> str:
     if item.kind == "trigger":
         where = "（只读的相关话题）" if item.context else ""
@@ -237,7 +260,7 @@ class AgentExecutor:
         if model is None:
             raise LookupError(f"no model named {config.model!r}; add [models.{config.model}] to the settings")
         path = job.state_file(".agent.json") if hasattr(job, "state_file") else transcript_path(job.workdir)
-        messages: list[dict[str, Any]] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        messages: list[dict[str, Any]] = _mend(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else []
         delegates = config.delegates()
         job.ssh = _ssh_for(ctx, job)
         job.projects = getattr(ctx, "projects", None)

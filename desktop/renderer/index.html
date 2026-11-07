@@ -670,6 +670,12 @@ l-33 -150 -4 -901 -3 -902 25 -28 24 -29 291 0 c277 0 291 1 310 20 20 20 20
               <div class="actions"><button id="ssh-copy-key" class="outline" type="button">复制公钥</button><button id="ssh-copy-line" class="outline" type="button">复制这一行</button></div>
             </div>
           </article>
+          <div class="bulk-row">
+            <label for="ssh-bulk">全部服务器的执行权限</label>
+            <select id="ssh-bulk"></select>
+            <button id="ssh-bulk-apply" class="outline" type="button">应用到全部</button>
+          </div>
+          <p id="ssh-bulk-note" class="hint" hidden></p>
           <div id="ssh-hosts"></div>
           <div id="ssh-empty" class="empty" hidden>
             <span class="en" aria-hidden="true">NO HOSTS YET</span>

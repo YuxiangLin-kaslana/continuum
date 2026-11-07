@@ -463,3 +463,6 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 .search-text mark { background: rgba(242, 163, 58, 0.3); color: #fff; padding: 0 1px; }
 .msg.flash { animation: flash 1.6s ease-out; }
 @keyframes flash { 0%, 30% { background: rgba(95, 211, 209, 0.18); } 100% { background: transparent; } }
+.bulk-row { display: flex; align-items: center; gap: 10px; margin: 12px 0 6px; flex-wrap: wrap; }
+.bulk-row label { font-size: 12.5px; color: var(--soft); }
+.bulk-row select { width: auto; flex: 1; min-width: 180px; }

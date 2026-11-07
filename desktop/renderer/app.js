@@ -583,7 +583,8 @@
     details.append(summary);
     const list = el('ol', 'work-steps');
     list.append(...steps.map(stepItem));
-    if (thinking && !current) list.append(el('li', 'step thinking', '思考中…'));
+    // Waiting for the person is not thinking.
+    if (thinking && !current && !asking) list.append(el('li', 'step thinking', '思考中…'));
     details.append(list);
     item.append(details);
     return arrival(item, `w:${ticket}`);
@@ -1129,7 +1130,47 @@
     return box;
   }
 
+  function renderBulk() {
+    const select = $('ssh-bulk');
+    const chosen = select.value || 'auto';
+    select.replaceChildren(...Object.entries(ssh.approvals).map(([value, text]) => Object.assign(el('option', '', text), { value })));
+    select.value = chosen;
+  }
+
+  // One choice for every server at once, asked twice since it decides what workers may run unasked.
+  $('ssh-bulk-apply').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const approval = $('ssh-bulk').value;
+    if (!button.dataset.confirm) {
+      button.dataset.confirm = '1';
+      button.textContent = `确认改 ${ssh.hosts.length} 台？`;
+      return;
+    }
+    delete button.dataset.confirm;
+    button.disabled = true;
+    let changed = 0;
+    const failed = [];
+    for (const h of ssh.hosts) {
+      if (h.approval === approval) continue;
+      try {
+        const saved = await call('sshSave', h.name, {
+          address: h.address, port: h.port, user: h.user, jump: h.jump || null, note: h.note || '', approval,
+        });
+        ssh.hosts = ssh.hosts.map((x) => (x.name === h.name ? saved : x));
+        changed++;
+      } catch (error) {
+        failed.push(`${h.name}：${error.message}`);
+      }
+    }
+    button.disabled = false;
+    button.textContent = '应用到全部';
+    $('ssh-bulk-note').textContent = `已把 ${changed} 台改为“${ssh.approvals[approval]}”。` + (failed.length ? ` 没改成：${failed.join('；')}` : '');
+    $('ssh-bulk-note').hidden = false;
+    renderSsh();
+  });
+
   function renderSsh() {
+    renderBulk();
     $('ssh-hosts').replaceChildren(...ssh.hosts.map(hostCard));
     $('ssh-empty').hidden = ssh.hosts.length > 0 || !$('ssh-form').hidden;
   }

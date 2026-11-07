@@ -378,3 +378,21 @@ def test_a_desktop_conversation_shows_the_steps_and_the_answer_as_it_is_written(
     assert written and written[-1] == "跑完了，输出是 hi。" and all("跑完了，输出是 hi。".startswith(t) for t in written)
     assert {e["thread"] for e in events if e["type"] in ("stream", "thinking", "idle")} == {"main"}
     assert any(e["type"] == "thinking" for e in events) and events[-1]["type"] != "thinking"
+
+
+def test_a_transcript_cut_off_while_tools_ran_is_mended_before_it_goes_back_to_the_model():
+    from continuum.plugins.agent_executor import _mend
+
+    cut = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"},
+           {"role": "assistant", "content": "", "tool_calls": [
+               {"id": "a", "type": "function", "function": {"name": "ssh", "arguments": "{}"}},
+               {"id": "b", "type": "function", "function": {"name": "ssh", "arguments": "{}"}},
+               {"id": "c", "type": "function", "function": {"name": "ssh", "arguments": "{}"}}]},
+           {"role": "tool", "tool_call_id": "a", "content": "ok"},
+           {"role": "user", "content": "【系统】The host restarted"}]
+    mended = _mend(cut)
+    assert [(m["role"], m.get("tool_call_id")) for m in mended] == [
+        ("system", None), ("user", None), ("assistant", None), ("tool", "a"), ("tool", "b"), ("tool", "c"),
+        ("user", None)]
+    assert "被中断了" in mended[4]["content"]
+    assert _mend(mended) == mended  # whole transcripts are left as they are

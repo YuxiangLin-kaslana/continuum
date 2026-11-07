@@ -31,8 +31,9 @@ class RouterAssessor:
         self.models = models or {}
         self.policy = policy
         self._engine: Engine | None = None
-        effects.handle("assessment", self._assess, base=2.0, cap=60.0, concurrency=4)
-        effects.handle("relay", self._relay, base=2.0, cap=60.0)
+        # Several messages sent one after another are judged side by side, not in a queue.
+        effects.handle("assessment", self._assess, base=2.0, cap=60.0, concurrency=16)
+        effects.handle("relay", self._relay, base=2.0, cap=60.0, concurrency=8)
 
     def bind(self, engine: Engine) -> None:
         self._engine = engine
