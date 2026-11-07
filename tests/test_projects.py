@@ -127,3 +127,68 @@ def test_a_worker_proposes_a_project_the_person_confirms_and_it_reminds_and_runs
     asyncio.run(main())
     saved = json.loads((tmp_path / "home" / "work").glob("*.agent.json").__next__().read_text())
     assert saved[0]["role"] == "system"
+
+
+def test_a_message_reaches_no_earlier_work_by_itself_and_goes_where_the_router_sends_it(tmp_path):
+    """Seen live: one message in the conversation reached every earlier ticket there, and two unrelated ones each
+    took it up. Now a message is a Thread of its own; the router opens a project for it, or forwards it."""
+    seen_cards = []
+
+    class Router(ScriptedModel):
+        async def complete(self, messages, tools=None, tool_choice=None, **extra):
+            seen_cards.append(messages[1]["content"])
+            return await super().complete(messages, tools, tool_choice, **extra)
+
+    router = Router(
+        call("decide", decision="accept", title="解释 LLM", scope="解释", acknowledgement="好。", reason="请求"),
+        call("decide", decision="accept", title="列封装", scope="列", acknowledgement="好。", reason="请求"),
+        # Something new: a project of its own, not a turn of the two earlier ones.
+        call("decide", decision="accept", title="看邮件提醒", scope="提醒", acknowledgement="好。", reason="请求"),
+        # A follow-up of the first: forwarded to it.
+        lambda messages: call("decide", decision="forward", project=next(
+            line.split()[1].removeprefix("id=") for line in messages[1]["content"].splitlines()
+            if "解释 LLM" in line), reason="是 LLM 那件事的后续"))
+    worker = StreamingModel(
+        call("report", state="ready", summary="LLM 是大语言模型。"),
+        call("report", state="ready", summary="0402、0603、0805。"),
+        call("report", state="ready", summary="好的，会提醒。"),
+        lambda messages: call("report", state="ready",
+                              summary=f"补充：{'再说说 LLM 的上下文长度' in messages[-1]['content']}"))
+
+    async def main():
+        rt = agent_runtime(tmp_path / "home", router, worker, sources={"app": {"kind": "app"}},
+                           policy={"sources": {"app": {"allowed": [{"id": "me"}]}}},
+                           api={"enabled": True, "port": 0})
+        me = {"Authorization": f"Bearer {rt.accounts.add('me')}"}
+        ctx = rt.sources["app"]
+        port, runner = await serve(rt)
+        replies = lambda: [m for m in ctx.kind.everything(ctx, "me") if m["role"] == "reply"]  # noqa: E731
+        try:
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as c:
+                for n, text in enumerate(["什么是 LLM", "常见贴片电阻封装", "以后提醒我看邮件"], 1):
+                    await c.post("/api/v1/threads/main/messages", headers=me, json={"text": text})
+                    await _until(lambda n=n: len(replies()) == n)
+                tickets = rt.store.tickets.list()
+                assert len(tickets) == 3
+                # The earlier work never saw the later messages.
+                for ticket in tickets:
+                    assert [i.kind for i in ticket.inputs if i.kind in ("trigger", "resumed")] == []
+                llm = next(t for t in tickets if t.title == "解释 LLM")
+                assert f"id={llm.id} 解释 LLM（一次性，已结束）" in seen_cards[2]
+
+                posted = (await c.post("/api/v1/threads/main/messages", headers=me,
+                                       json={"text": "再说说 LLM 的上下文长度"})).json()
+                await _until(lambda: len(replies()) == 4)
+                assert len(rt.store.tickets.list()) == 3  # no new project for a follow-up
+                # The router saw the recent conversation, each message with the project it belongs to.
+                assert f"[{llm.id}] 助理：LLM 是大语言模型。" in seen_cards[3] and "最近的对话" in seen_cards[3]
+                assert replies()[-1]["ticket_id"] == llm.id and replies()[-1]["text"] == "补充：True"
+                forwarded = next(m for m in ctx.kind.everything(ctx, "me") if m["id"] == posted["id"])
+                assert forwarded["meta"] == {"project": llm.id, "project_name": "解释 LLM"}
+                tagged = {m["id"]: m["project"] for m in (await c.get("/api/v1/messages", headers=me)).json()}
+                assert tagged[posted["id"]] == llm.id
+        finally:
+            runner.cancel()
+            await rt.close()
+
+    asyncio.run(main())

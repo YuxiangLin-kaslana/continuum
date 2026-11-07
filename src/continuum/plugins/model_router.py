@@ -34,9 +34,18 @@ ROUTER = """你是 Continuum 的路由器。你只决定一条请求要不要变
 - ignore：只有纯客套（谢谢、好的、收到、早上好）、对已有工单的重复请求（已有工单列在下面），或者明显不是对你说的话。
   reason 写一句理由。被 ignore 的消息不会得到任何回复，所以拿不准时选 accept。
 """
+FORWARDING = """
+下面列出了这个人进行中（或刚结束）的项目，和你们最近的对话（标着每条属于哪个项目）。如果这条消息是其中某个项目的
+后续——补充或修改要求、回答它的问题、问它的进展、让它接着做、对它的结果再加工——选 forward，project 填那个项目的 id，
+它会交给那个项目去处理（它记得之前做过什么）；不要为同一件事再开一个。
+结合最近的对话判断：“刚才那个”“这个结果”“再……”“接着”“改成……”这类指代刚说过的内容的，指的是最近的对话里
+最后在说的那件事（看最后几条属于哪个项目），以对话的先后为准，不看项目名字和这条消息的字面像不像。
+和这些项目都无关的新事才 accept。
+"""
 
 DECIDE = tool("decide", "对这个候选做决定。", {
-    "decision": {"type": "string", "enum": ["accept", "ignore"]},
+    "decision": {"type": "string", "enum": ["accept", "ignore", "forward"]},
+    "project": {"type": "string", "description": "forward 时：它所继续的那个项目的 id"},
     "title": {"type": "string"}, "scope": {"type": "string"}, "acknowledgement": {"type": "string"},
     "name": {"type": "string"}, "reason": {"type": "string"}}, required=["decision", "reason"])
 
@@ -65,7 +74,8 @@ class ModelRouterConfig(BaseModel):
     instructions: str = ""
 
 
-def _card(candidate: Candidate) -> str:
+def _card(candidate: Candidate, projects: list[dict[str, Any]] | None = None,
+          recent: list[dict[str, Any]] | None = None) -> str:
     lines = ["候选消息（按时间）："]
     for t in candidate.triggers:
         who = f"{t.actor.id}{'（人）' if t.human else '（机器人/CI）'}"
@@ -76,6 +86,14 @@ def _card(candidate: Candidate) -> str:
         for ticket in candidate.tickets:
             state = f"已结束（{ticket.ended.outcome}）" if ticket.ended else "进行中"
             lines.append(f"- {ticket.title}：{state}")
+    if projects:
+        lines.append("这个人进行中（或刚结束）的项目：")
+        for p in projects:
+            lines.append(f"- id={p['id']} {p['name']}（{p['kind']}，{p['state']}）")
+    if recent:
+        lines.append("最近的对话（旧→新，不含这条）：")
+        for m in recent:
+            lines.append(f"- [{m['project'] or '-'}] {m['who']}：{m['text']}")
     return "\n".join(lines)
 
 
@@ -97,9 +115,12 @@ class ModelRouter:
             raise LookupError(f"no model named {config.model!r}")
         if candidate.strength != "explicit":
             return await self._assess_inferred(ctx, candidate, model, config)
-        system = ROUTER + (f"\n团队的要求：\n{config.instructions}" if config.instructions else "")
+        projects = self._continuable(ctx, candidate)
+        recent = self._recent(ctx, candidate) if projects else []
+        system = ROUTER + (FORWARDING if projects else "") + (
+            f"\n团队的要求：\n{config.instructions}" if config.instructions else "")
         message = await model.complete(
-            [{"role": "system", "content": system}, {"role": "user", "content": _card(candidate)}],
+            [{"role": "system", "content": system}, {"role": "user", "content": _card(candidate, projects, recent)}],
             tools=[DECIDE], tool_choice={"type": "function", "function": {"name": "decide"}}, **config.extra)
         calls = tool_calls(message)
         if not calls:
@@ -107,6 +128,13 @@ class ModelRouter:
             return None
         args = calls[0][2]
         reason = str(args.get("reason") or "")
+        if args.get("decision") == "forward" and projects:
+            target = str(args.get("project") or "")
+            name = ctx.projects.forward(candidate.triggers[-1], target) if target in {p["id"] for p in projects} else None
+            if name is not None:
+                # Recorded as an ignore here: the message went on to the project, whose own work takes it up.
+                return Ignore(reason=f"转给项目「{name}」：{reason}"[:300], audit={"router": args, "forwarded": target})
+            log.warning("router: could not forward %s to %r; taking it as new", candidate.eval_id, target)
         # Only an explicit ignore drops a message, since nobody hears back from one: a model that leaves the decision
         # out (it happens) takes the side the rules take when unsure.
         if args.get("decision") == "ignore":
@@ -116,6 +144,32 @@ class ModelRouter:
         return Accept(title=title[:80], scope=str(args.get("scope") or title), reason=reason or "explicit request",
                       acknowledgement=str(args.get("acknowledgement") or f"收到，开始处理：{title}"),
                       name=_slug(args.get("name")), audit={"router": args})
+
+    @staticmethod
+    def _continuable(ctx: RouterContext, candidate: Candidate) -> list[dict[str, Any]]:
+        """The projects a single message from a person in their conversation might continue; none for a message
+        already said in a project (it is a run of that project) or for anything else."""
+        if getattr(ctx, "projects", None) is None or len(candidate.triggers) != 1:
+            return []
+        trigger = candidate.triggers[0]
+        address = trigger.channel.address if trigger.channel else {}
+        if not trigger.human or not address.get("user") or str(address.get("thread", "")).startswith("p-"):
+            return []
+        try:
+            return ctx.projects.open_for(address["user"])
+        except Exception:  # noqa: BLE001 - without the list, the message is judged on its own
+            log.exception("router: listing projects failed")
+            return []
+
+    @staticmethod
+    def _recent(ctx: RouterContext, candidate: Candidate) -> list[dict[str, Any]]:
+        trigger = candidate.triggers[0]
+        address = trigger.channel.address if trigger.channel else {}
+        try:
+            return ctx.projects.recent_for(address["user"], before=int(address.get("message") or 0))
+        except Exception:  # noqa: BLE001 - without it, the message is judged on its own
+            log.exception("router: reading the recent conversation failed")
+            return []
 
     async def _assess_inferred(self, ctx: RouterContext, candidate: Candidate, model, config) -> Outcome | None:
         policy = ctx.policy

@@ -11,7 +11,7 @@ import fcntl
 import logging
 import os
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal
@@ -111,6 +111,7 @@ class Runtime:
             self.executor.project_for = self.project_for_ticket
             self.executor.projects = self.projects
             self.executor.context.projects = ProjectDesk(self)
+            self.router.projects = self.executor.context.projects
             self.router.bind(self.engine)
             self.executor.bind(self.engine)
         except BaseException:
@@ -428,6 +429,82 @@ class ProjectDesk:
 
     def timezone_of(self, user: str) -> str:
         return self.rt.timezone_of(user)
+
+    # --- for the router: a message may continue a project instead of starting one ---
+
+    def open_for(self, user: str) -> list[dict[str, Any]]:
+        """The person's projects a new message might continue: the long-running ones, and the one-off ones that are
+        open or ended in the last day (newest first, a handful)."""
+        ctx = self.rt.app_source()
+        if ctx is None:
+            return []
+        out: list[dict[str, Any]] = []
+        for project in self.rt.projects.list(user):
+            if project.state in ("active", "paused"):
+                out.append({"id": project.id, "name": project.name, "kind": "长期项目",
+                            "state": "进行中" if project.state == "active" else "已暂停"})
+        recent = datetime.now(UTC) - timedelta(days=1)
+        once = []
+        for ticket in self.rt.store.tickets.list():
+            if ticket.mandate.actor.id != user or ticket.mandate.actor.source != ctx.instance:
+                continue
+            if self.rt.project_for_ticket(ticket) is not None:
+                continue
+            if ticket.ended is not None and ticket.updated_at < recent:
+                continue
+            once.append(ticket)
+        once.sort(key=lambda t: t.updated_at, reverse=True)
+        for ticket in once[:8]:
+            out.append({"id": ticket.id, "name": ticket.title, "kind": "一次性",
+                        "state": "已结束" if ticket.ended else "进行中"})
+        return out
+
+    def recent_for(self, user: str, before: int, count: int = 8) -> list[dict[str, Any]]:
+        """The last few messages of the person's conversation before `before`, each with the project it belongs to."""
+        ctx = self.rt.app_source()
+        if ctx is None:
+            return []
+        by_ticket = {}
+        for ticket in self.rt.store.tickets.list():
+            if ticket.mandate.actor.id == user:
+                project = self.rt.project_for_ticket(ticket)
+                by_ticket[ticket.id] = project.id if project else ticket.id
+        rows = [m for m in ctx.kind.everything(ctx, user, limit=60) if not before or m["id"] < before]
+        out = []
+        for m in rows[-count:]:
+            meta = m.get("meta") or {}
+            project = meta.get("project") or project_of_thread(m.get("thread")) or by_ticket.get(m.get("ticket_id") or "")
+            who = {"user": "人", "reply": "助理", "acknowledgement": "助理"}.get(m["role"], m["role"])
+            text = " ".join(m["text"].split())
+            out.append({"project": project, "who": who, "text": text if len(text) <= 120 else text[:120] + "…"})
+        return out
+
+    def forward(self, trigger: Any, project_id: str) -> str | None:
+        """Take a person's message to the project it continues; the project's name, or None if it cannot go there."""
+        ctx = self.rt.app_source()
+        address = trigger.channel.address if trigger.channel else {}
+        user, row = address.get("user"), address.get("message")
+        if ctx is None or not user or not row or trigger.source != ctx.instance:
+            return None
+        project = self.rt.projects.get(project_id)
+        if project is not None:
+            if project.owner != user or project.state not in ("active", "paused"):
+                return None
+            # A new run of the project: a Thread of its own on the project's conversation.
+            ok = ctx.kind.forward(ctx, user, int(row), f"{user}/{project.thread}/{row}", project.thread,
+                                  {"project": project.id, "project_name": project.name})
+            return project.name if ok else None
+        ticket = self.rt.store.tickets.get(project_id)
+        if ticket is None or ticket.mandate.actor.id != user:
+            return None
+        origin = self.rt.store.triggers.get(ticket.origin.trigger_id)
+        if origin is None or not origin.threads:
+            return None
+        # The one-off project's own Thread: its ticket takes the message up (and opens again if it had ended).
+        display = (origin.channel.address.get("thread") if origin.channel else None) or "main"
+        ok = ctx.kind.forward(ctx, user, int(row), origin.threads[0].id, display,
+                              {"project": ticket.id, "project_name": ticket.title})
+        return ticket.title if ok else None
 
     def propose_from(self, job: Any, args: dict[str, Any]) -> Any:
         owner = getattr(job, "requester", None)

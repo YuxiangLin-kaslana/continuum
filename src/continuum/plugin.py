@@ -82,6 +82,8 @@ class RouterContext:
     models: Mapping[str, ChatModel] = field(default_factory=dict)
     # The Policy's configuration, for rules and accept mode.
     policy: Any = None
+    # The person's projects, so a message can go to the one it continues (runtime.app.ProjectDesk).
+    projects: Any = None
 
 
 class RouterKind(Protocol):

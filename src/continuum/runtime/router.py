@@ -41,7 +41,8 @@ class RouterAssessor:
     def context(self) -> RouterContext:
         assert self._engine is not None
         return RouterContext(engine=self._engine, config=self.config, models=self.models,
-                             policy=self.policy() if callable(self.policy) else self.policy)
+                             policy=self.policy() if callable(self.policy) else self.policy,
+                             projects=getattr(self, "projects", None))
 
     # --- the port ---
 

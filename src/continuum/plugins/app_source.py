@@ -74,7 +74,7 @@ class AppSource:
 
     def _row(self, ctx: Any, row_id: int) -> dict[str, Any]:
         row = self._db(ctx).execute(f"SELECT {', '.join(COLUMNS)} FROM messages WHERE id = ?", (row_id,)).fetchone()
-        return _message(row)
+        return _message(row) if row else None
 
     # --- the SourceKind protocol ---
 
@@ -111,7 +111,9 @@ class AppSource:
             "INSERT INTO messages (user, thread, role, text, at, meta) VALUES (?, ?, ?, ?, ?, ?)",
             (user, thread, role, text, at.isoformat(), json.dumps(meta, ensure_ascii=False) if meta else None))
         row_id = int(cursor.lastrowid or 0)
-        ref = ThreadRef(source=ctx.instance, id=thread_id(user, thread))
+        # Every message is a Thread of its own: it reaches no earlier work by itself. The router decides whether it
+        # is something new or continues a project, and `forward` takes it there.
+        ref = ThreadRef(source=ctx.instance, id=thread_id(user, f"{thread}/{row_id}"))
         ctx.receive(Trigger(
             id=f"{ctx.instance}:{row_id}", source=ctx.instance, threads=(ref,),
             actor=ActorRef(source=ctx.instance, id=user), human=True, addressed="direct", at=at, text=text,
@@ -120,6 +122,23 @@ class AppSource:
         row = self._row(ctx, row_id)
         self.publish(user, {"type": "message", "message": row})
         return row
+
+    def forward(self, ctx: Any, user: str, row_id: int, to_thread: str, display_thread: str,
+                meta: dict[str, Any]) -> bool:
+        """Hand a person's message to the work it continues: the same words, as a Trigger on that work's Thread (whose
+        tickets take it up), answered in `display_thread`. The message is marked as belonging there."""
+        row = self._row(ctx, row_id)
+        if row is None or row["user"] != user:
+            return False
+        at = datetime.fromisoformat(row["at"])
+        ref = ThreadRef(source=ctx.instance, id=to_thread)
+        ctx.receive(Trigger(
+            id=f"{ctx.instance}:{row_id}:to:{to_thread}", source=ctx.instance, threads=(ref,),
+            actor=ActorRef(source=ctx.instance, id=user), human=True, addressed="direct", at=at, text=row["text"],
+            channel=ChannelRef(source=ctx.instance, thread=ref.id,
+                               address={"user": user, "thread": display_thread, "message": str(row_id)})))
+        self.update_meta(ctx, row_id, {**(row.get("meta") or {}), **meta})
+        return True
 
     def history(self, ctx: Any, user: str, thread: str, after: int = 0, limit: int = 200) -> list[dict[str, Any]]:
         rows = self._db(ctx).execute(
