@@ -119,6 +119,12 @@ jobs:
                 echo "$tag is already released"
                 exit 0
               fi
+              # A tagged version is published by its tag's own run: two builds uploading at once could leave one
+              # build's installer beside the other's latest.yml, and the apps' update would fail its checksum.
+              if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+                echo "$tag is tagged; its tag's run publishes it"
+                exit 0
+              fi
             fi
             version="${tag#v}"
             installer="dist/Continuum-Setup-${version}.exe"
