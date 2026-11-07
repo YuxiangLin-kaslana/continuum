@@ -143,6 +143,12 @@
     maximize: () => {},
     updateInfo: () => ok({ current: '0.0.6', update: window.__fake.update || null }),
     installUpdate: () => { window.__fake.installed = true; },
+    checkUpdate: () => {
+      window.__fake.checks = (window.__fake.checks || 0) + 1;
+      return ok(window.__fake.latest
+        ? { status: 'available', current: '0.0.6', latest: window.__fake.latest }
+        : { status: 'latest', current: '0.0.6', latest: '0.0.6' });
+    },
     onUpdate: (fn) => listeners.update.push(fn),
     onEvent: (fn) => listeners.event.push(fn),
     onState: (fn) => listeners.state.push(fn),

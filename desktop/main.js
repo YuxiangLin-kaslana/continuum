@@ -223,11 +223,27 @@ app.on('will-quit', () => globalShortcut.unregisterAll());
 // --- updates: from the GitHub releases, downloaded in the background and installed on the next start -------------
 
 let update = null; // { version, ready }
+let updater = null;
+
+// One check: whether a newer version is out (and if so it starts downloading). Asked at start, on every login, every
+// four hours, and from the settings page.
+async function checkForUpdate() {
+  if (!updater) return { status: 'dev', current: app.getVersion() };
+  try {
+    const result = await updater.checkForUpdates();
+    const latest = result && result.updateInfo ? result.updateInfo.version : app.getVersion();
+    const newer = result && result.isUpdateAvailable !== undefined ? result.isUpdateAvailable : latest !== app.getVersion();
+    return { status: newer ? 'available' : 'latest', current: app.getVersion(), latest, update };
+  } catch (error) {
+    return { status: 'error', current: app.getVersion(), message: error.message };
+  }
+}
 
 function watchForUpdates() {
   // Only an installed app updates itself; a development run (`npm start`) has nothing to replace.
   if (!app.isPackaged || SMOKE) return;
   const { autoUpdater } = require('electron-updater');
+  updater = autoUpdater;
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.on('update-available', (info) => {
@@ -242,9 +258,8 @@ function watchForUpdates() {
     }
   });
   autoUpdater.on('error', (error) => console.error('update:', error.message));
-  const check = () => autoUpdater.checkForUpdates().catch((error) => console.error('update:', error.message));
-  check();
-  setInterval(check, 4 * 60 * 60 * 1000);
+  checkForUpdate();
+  setInterval(checkForUpdate, 4 * 60 * 60 * 1000);
   ipcMain.on('update:install', () => {
     if (update && update.ready) {
       quitting = true;
@@ -254,3 +269,4 @@ function watchForUpdates() {
 }
 
 handle('update:get', () => ({ current: app.getVersion(), update }));
+handle('update:check', () => checkForUpdate());

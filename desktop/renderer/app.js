@@ -228,6 +228,8 @@
     await Promise.all([loadThreads(), loadTickets()]);
     await openThread(state.thread);
     $('input').focus();
+    // Every login asks whether a newer version is out.
+    checkUpdate(false);
   }
 
   function setView(view) {
@@ -812,6 +814,38 @@
     api.onUpdate((update) => call('updateInfo').then(showUpdate).catch(() => showUpdate({ current: '', update })));
     $('update-install').addEventListener('click', () => api.installUpdate());
   }
+
+  const UPDATE_WORDS = {
+    latest: (r) => `已经是最新版本（${r.current}）。`,
+    available: (r) => `发现新版本 ${r.latest}，正在后台下载，下载好后底部会提示重启。`,
+    dev: () => '这是开发版本，不会自动更新。',
+    error: (r) => `检测失败：${r.message}`,
+  };
+  async function checkUpdate(shown) {
+    if (!api.checkUpdate) return;
+    if (shown) {
+      $('check-update').disabled = true;
+      $('check-update').textContent = '检测中…';
+    }
+    try {
+      const result = await call('checkUpdate');
+      if (shown) {
+        $('update-result').textContent = (UPDATE_WORDS[result.status] || (() => ''))(result);
+        $('update-result').hidden = false;
+      }
+      showUpdate(await call('updateInfo'));
+    } catch (error) {
+      if (shown) {
+        $('update-result').textContent = `检测失败：${error.message}`;
+        $('update-result').hidden = false;
+      }
+    } finally {
+      $('check-update').disabled = false;
+      $('check-update').textContent = '检测更新';
+    }
+  }
+  $('check-update').addEventListener('click', () => checkUpdate(true));
+  if (!api.checkUpdate) $('check-update').hidden = true;
 
   // --- live events ---
 
