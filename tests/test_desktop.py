@@ -59,7 +59,7 @@ def test_the_avatars_drawn_from_names():
 def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
     sync_playwright = _browser()
     with sync_playwright() as p:
-        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        browser = p.chromium.launch()
         page = browser.new_context(viewport={"width": 520, "height": 780}, bypass_csp=True).new_page()
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
@@ -220,7 +220,7 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
 def test_the_settings_page_adds_tests_and_removes_ssh_servers():
     sync_playwright = _browser()
     with sync_playwright() as p:
-        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        browser = p.chromium.launch()
         context = browser.new_context(viewport={"width": 520, "height": 780}, bypass_csp=True)
         context.grant_permissions(["clipboard-read", "clipboard-write"])
         page = context.new_page()
@@ -317,7 +317,7 @@ def test_the_settings_page_adds_tests_and_removes_ssh_servers():
 def test_nothing_in_a_conversation_scrolls_sideways_and_markdown_renders(width):
     sync_playwright = _browser()
     with sync_playwright() as p:
-        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        browser = p.chromium.launch()
         page = browser.new_context(viewport={"width": width, "height": 780}, bypass_csp=True).new_page()
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
@@ -371,7 +371,7 @@ def test_nothing_in_a_conversation_scrolls_sideways_and_markdown_renders(width):
 def test_a_command_on_a_server_waits_in_the_conversation_for_the_persons_approval():
     sync_playwright = _browser()
     with sync_playwright() as p:
-        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        browser = p.chromium.launch()
         page = browser.new_context(viewport={"width": 520, "height": 780}, bypass_csp=True).new_page()
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
@@ -410,7 +410,7 @@ def test_a_command_on_a_server_waits_in_the_conversation_for_the_persons_approva
 def test_the_workers_page_counts_what_runs_and_what_ran():
     sync_playwright = _browser()
     with sync_playwright() as p:
-        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        browser = p.chromium.launch()
         page = browser.new_context(viewport={"width": 520, "height": 780}, bypass_csp=True).new_page()
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
@@ -424,10 +424,10 @@ def test_the_workers_page_counts_what_runs_and_what_ran():
         page.click("#tab-projects")
         page.click("#seg-workers")
         page.wait_for_selector("#busy:not([hidden])")
-        assert page.inner_text("#busy") == "1"
+        assert page.inner_text("#busy") == "3"  # the lead and its two sub-workers
         page.wait_for_selector(".card.worker.busy")
         stats = page.locator("#worker-stats .stat").all_inner_texts()
-        assert stats[0].split() == ["1/3", "正在干活", "/", "上限"] and "累计调用 Worker" in stats[2]
+        assert stats[0].split() == ["3/30", "正在干活", "/", "上限"] and "累计调用 Worker" in stats[2]
         tools = dict(t.split("\n")[::-1] for t in page.locator("#worker-tools .stat").all_inner_texts())
         assert tools == {"Claude Code": "2", "Codex": "1", "远程命令": "4", "本地命令": "12", "文件操作": "5"}
         busy = page.inner_text(".card.worker.busy")
@@ -435,10 +435,34 @@ def test_the_workers_page_counts_what_runs_and_what_ran():
         assert "等待中" in page.inner_text(".card.worker.idle")
         ended = page.inner_text(".card.worker.ended")
         assert "已完成" in ended and "用时" in ended and "6 分 0 秒" in ended and "远程命令 4" in ended
-        assert page.locator("#workers .group").all_inner_texts() == ["运行中 02", "最近 01"]
+        assert page.locator("#workers .group").all_inner_texts() == ["运行中 02", "子 Worker 02", "最近 01"]
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-workers.png")
-        page.locator(".card.worker.busy").get_by_role("button", name="查看对话").click()
+        # The sub-workers a lead sent out, each with what it is on.
+        assert page.locator("#workers .group").all_inner_texts() == ["运行中 02", "子 Worker 02", "最近 01"]
+        crew = page.locator(".card.worker.crew").first.inner_text()
+        assert "1·供应商甲" in crew and "整理本周交期变化" in crew and "python3 leadtimes.py a" in crew
+        assert "2 个正在同时干活" in page.locator(".card.worker.busy").first.inner_text()
+        page.locator(".card.worker.busy").first.get_by_role("button", name="查看对话").click()
+        assert page.is_visible("#project-detail") and "整理本周交期变化" in page.inner_text("#project-card")
+
+        # In the conversation: the lead's dispatch, and each sub-worker's steps tagged with its name.
+        page.click("#tab-chat")
+        page.evaluate("""() => {
+            const step = (key, name, input, status, worker) => window.__fake.fire('event', { type: 'step', step: {
+                id: 900 + key.length, user: 'me', thread: 'main', ticket_id: 't-2', project: 't-2', key, name, input,
+                status, output: status === 'running' ? '1. 供应商甲\\n2. 供应商乙' : '', worker,
+                at: new Date(Date.now() + 3600e3).toISOString() } });
+            step('d', 'dispatch', '派出 2 个 Worker：供应商甲、供应商乙', 'running');
+            step('d1', 'shell', 'python3 leadtimes.py a', 'running', '1·供应商甲');
+            step('d22', 'shell', 'python3 leadtimes.py b', 'done', '2·供应商乙');
+        }""")
+        page.wait_for_selector(".work.running summary >> text=2 个 Worker 正在同时干活…")
+        assert page.locator(".work.running .step-worker").all_inner_texts() == ["1·供应商甲", "2·供应商乙"]
+        assert "派出 Worker" in page.inner_text(".work.running .step.dispatch")
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-dispatch.png")
+        page.click("#tab-projects")  # the project opened from the workers page is still open there
         assert page.is_visible("#project-detail") and "整理本周交期变化" in page.inner_text("#project-card")
         assert errors == []
         browser.close()
@@ -448,7 +472,7 @@ def test_the_workers_page_counts_what_runs_and_what_ran():
 def test_searching_the_conversation_finds_and_goes_to_a_message():
     sync_playwright = _browser()
     with sync_playwright() as p:
-        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        browser = p.chromium.launch()
         page = browser.new_context(viewport={"width": 520, "height": 780}, bypass_csp=True).new_page()
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))

@@ -222,12 +222,18 @@
     workers: () => {
       const at = (min) => new Date(Date.now() - min * 60000).toISOString();
       return ok({
-        executor: 'agent', max_workers: 3, busy_now: 1,
+        executor: 'agent', max_workers: 30, busy_now: 3, crew_waiting: 0,
+        crew: [
+          { id: 'c1', ticket_id: 't-2', title: '整理本周交期变化', label: '1·供应商甲', task: '整理供应商甲的交期',
+            started_at: at(2), step: { name: 'shell', input: 'python3 leadtimes.py a', status: 'running' } },
+          { id: 'c2', ticket_id: 't-2', title: '整理本周交期变化', label: '2·供应商乙', task: '整理供应商乙的交期',
+            started_at: at(2), step: null },
+        ],
         totals: { assignments: 7, tickets: 5, running: 2, waiting: 1, pending: 0 },
         tools: { shell: 12, read_file: 3, write_file: 2, claude_code: 2, codex: 1, ssh: 4 },
         running: [
           { ticket_id: 't-2', title: '整理本周交期变化', thread: 'main', assignment_id: 'a2', number: 1, state: 'running',
-            busy: true, started_at: at(3), created_at: at(3), steps: { shell: 2, claude_code: 1 },
+            busy: true, crew: 2, started_at: at(3), created_at: at(3), steps: { shell: 2, claude_code: 1 },
             current: { name: 'claude_code', input: '把交期表整理成 markdown 表格', status: 'running' } },
           { ticket_id: 't-1', title: '核对 Laser Control Board 的供应商报价', thread: 'main', assignment_id: 'a1',
             number: 2, state: 'running', busy: false, started_at: at(40), created_at: at(40), steps: { shell: 1 },

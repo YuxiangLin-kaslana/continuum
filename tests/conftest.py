@@ -7,6 +7,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import os
+import time
+
 import pytest
 
 from continuum.core import Accept, ActorRef, Admit, Candidate, ChannelRef, Engine, EngineOptions, MandateBasis, \
@@ -166,3 +169,28 @@ def h(request, tmp_path) -> Harness:
         from continuum.runtime.store import SQLiteStore
         return Harness(repo=SQLiteStore(tmp_path / "test.db"))
     return Harness()
+
+
+# --- the whole suite stays within a minute -------------------------------------------------------------------------
+
+BUDGET_SECONDS = float(os.environ.get("CONTINUUM_TEST_BUDGET", "60"))
+_started: list[float] = []
+
+
+def pytest_sessionstart(session):
+    _started.append(time.monotonic())
+
+
+def pytest_sessionfinish(session, exitstatus):
+    # Only the run as a whole counts (with xdist, its workers report to the controller, which checks).
+    if hasattr(session.config, "workerinput") or not _started or session.config.option.collectonly:
+        return
+    spent = time.monotonic() - _started[0]
+    selected = session.config.args and any("::" in a or a.endswith(".py") for a in session.config.args)
+    if spent > BUDGET_SECONDS and not selected:
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        if reporter:
+            reporter.ensure_newline()
+            reporter.write_line(f"the suite took {spent:.0f}s, over its {BUDGET_SECONDS:.0f}s budget: make the slowest "
+                                "tests faster (pytest --durations=10 names them)", red=True)
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED

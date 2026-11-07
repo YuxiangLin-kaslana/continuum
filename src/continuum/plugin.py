@@ -113,6 +113,8 @@ class ExecutorContext:
     ssh: Any = None
     # The person's projects, for a worker that proposes one (runtime.app.ProjectDesk).
     projects: Any = None
+    # The places sub-workers take when a lead sends several out at once (runtime.crew.Crew).
+    crew: Any = None
 
 
 class ExecutorKind(Protocol):

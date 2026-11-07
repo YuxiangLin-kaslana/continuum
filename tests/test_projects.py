@@ -192,3 +192,72 @@ def test_a_message_reaches_no_earlier_work_by_itself_and_goes_where_the_router_s
             await rt.close()
 
     asyncio.run(main())
+
+
+class LeadAndCrew:
+    """A model for a lead and its sub-workers, answering by what it is asked (they run at once, in any order)."""
+
+    def __init__(self):
+        self.seen = []
+
+    async def complete(self, messages, tools=None, tool_choice=None, **extra):
+        self.seen.append([dict(m) for m in messages])
+        system = messages[0]["content"]
+        if system.startswith("你是 Continuum 的一个子 Worker"):
+            name = messages[1]["content"].split("你的子任务（")[1].split("）")[0]
+            if messages[-1]["role"] == "tool":
+                return call("finish", summary=f"{name}：{messages[-1]['content'].splitlines()[-1]}")
+            return call("shell", command=f"sleep 1; echo {name.split('·')[1]} ok")
+        if messages[-1]["role"] == "tool" and "【1·" in messages[-1]["content"]:
+            parts = [p for p in messages[-1]["content"].split("\n") if p.startswith("【")]
+            return call("report", state="ready", summary=f"三台都查完了：{' / '.join(parts)}")
+        assert any(t["function"]["name"] == "dispatch" for t in tools)
+        return call("dispatch", tasks=[{"name": n, "task": f"检查 {n} 的磁盘"} for n in ("andrew", "bestek", "crm")])
+
+    async def close(self):
+        pass
+
+
+def test_a_lead_sends_workers_out_side_by_side_within_the_crews_limit(tmp_path):
+    router = ScriptedModel(call("decide", decision="accept", title="查三台服务器", scope="查磁盘",
+                                acknowledgement="好，分头去查。", reason="请求"))
+    worker = LeadAndCrew()
+
+    async def main():
+        rt = agent_runtime(tmp_path / "home", router, worker, sources={"app": {"kind": "app"}},
+                           policy={"sources": {"app": {"allowed": [{"id": "me"}]}}},
+                           api={"enabled": True, "port": 0})
+        rt.crew = type(rt.crew)(2)  # two places: the third waits its turn
+        rt.executor.context.crew = rt.crew
+        me = {"Authorization": f"Bearer {rt.accounts.add('me')}"}
+        ctx = rt.sources["app"]
+        port, runner = await serve(rt)
+        most = 0
+        try:
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as c:
+                await c.post("/api/v1/threads/main/messages", headers=me, json={"text": "查一下 andrew、bestek、crm 的磁盘"})
+                await _until(lambda: bool(rt.crew.active), timeout=10)
+                page = (await c.get("/api/v1/workers", headers=me)).json()
+                assert page["crew"] and page["crew"][0]["title"] == "查三台服务器"
+                assert page["busy_now"] == 1 + len(page["crew"]) and page["running"][0]["crew"] == len(page["crew"])
+                started = asyncio.get_running_loop().time()
+                while not any(m["role"] == "reply" for m in ctx.kind.everything(ctx, "me")):
+                    most = max(most, len(rt.crew.active))
+                    assert asyncio.get_running_loop().time() - started < 15, "timed out"
+                    await asyncio.sleep(0.02)
+                return ctx.kind.everything(ctx, "me"), ctx.kind.steps(ctx, "me", None), most
+        finally:
+            runner.cancel()
+            await rt.close()
+
+    messages, steps, most = asyncio.run(main())
+    reply = [m for m in messages if m["role"] == "reply"][-1]["text"]
+    assert reply.startswith("三台都查完了：") and all(f"·{n}：{n} ok" in reply for n in ("andrew", "bestek", "crm"))
+    assert most == 2  # never more at once than the crew has places
+    dispatch = next(s for s in steps if s["name"] == "dispatch")
+    assert dispatch["status"] == "done" and dispatch["input"] == "派出 3 个 Worker：andrew、bestek、crm"
+    shells = sorted((s["worker"], s["status"]) for s in steps if s["name"] == "shell")
+    assert shells == [("1·andrew", "done"), ("2·bestek", "done"), ("3·crm", "done")]
+    # Each sub-worker got the project's background and only its own task, and could not talk to the person.
+    subs = [m for m in worker.seen if m[0]["content"].startswith("你是 Continuum 的一个子 Worker")]
+    assert all("项目背景：" in m[1]["content"] for m in subs)

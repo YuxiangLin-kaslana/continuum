@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS steps (
   at TEXT NOT NULL, ended_at TEXT, UNIQUE (user, ticket_id, key));
 CREATE INDEX IF NOT EXISTS steps_thread ON steps (user, thread, id);
 """
-STEP_COLUMNS = ("id", "user", "thread", "ticket_id", "key", "name", "input", "output", "status", "at", "ended_at")
+STEP_COLUMNS = ("id", "user", "thread", "ticket_id", "key", "name", "input", "output", "status", "at", "ended_at",
+                "worker")
 COLUMNS = ("id", "user", "thread", "role", "text", "message_id", "reply_to", "ticket_id", "at", "meta")
 
 
@@ -69,6 +70,9 @@ class AppSource:
             # Added after the first release: what a message is besides its text, such as the project it belongs to.
             if "meta" not in {r[1] for r in db.execute("PRAGMA table_info(messages)")}:
                 db.execute("ALTER TABLE messages ADD COLUMN meta TEXT")
+            # And which of a lead's sub-workers took a step.
+            if "worker" not in {r[1] for r in db.execute("PRAGMA table_info(steps)")}:
+                db.execute("ALTER TABLE steps ADD COLUMN worker TEXT")
             self._dbs[path] = db
         return self._dbs[path]
 
@@ -222,11 +226,11 @@ class AppSource:
         ended = None if event["status"] == "running" else now
         db = self._db(ctx)
         db.execute(
-            "INSERT INTO steps (user, thread, ticket_id, key, name, input, output, status, at, ended_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (user, ticket_id, key) DO UPDATE SET "
+            "INSERT INTO steps (user, thread, ticket_id, key, name, input, output, status, at, ended_at, worker) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (user, ticket_id, key) DO UPDATE SET "
             "output = excluded.output, status = excluded.status, ended_at = excluded.ended_at",
             (user, thread, ticket_id, str(event["key"]), str(event["name"]), str(event.get("input", "")),
-             str(event.get("output", "")), str(event["status"]), now, ended))
+             str(event.get("output", "")), str(event["status"]), now, ended, event.get("worker")))
         row = db.execute(f"SELECT {', '.join(STEP_COLUMNS)} FROM steps WHERE user = ? AND ticket_id = ? AND key = ?",
                          (user, ticket_id, str(event["key"]))).fetchone()
         self.publish(user, {"type": "step", "step": dict(zip(STEP_COLUMNS, row, strict=True))})

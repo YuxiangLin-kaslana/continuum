@@ -44,6 +44,7 @@
     repeat: '<path d="M4 12a8 8 0 0 1 14-5.3L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-14 5.3L4 15"/><path d="M4 20v-5h5"/>',
     claude_code: '<path d="M4 12h11M11 7l5 5-5 5"/><rect x="16" y="4" width="5" height="16" rx="1"/>',
     ssh: '<rect x="3" y="4" width="18" height="7" rx="1"/><rect x="3" y="13" width="18" height="7" rx="1"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+    dispatch: '<circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7 12h10M7 11l10-5M7 13l10 5"/>',
     codex: '<path d="M4 12h11M11 7l5 5-5 5"/><rect x="16" y="4" width="5" height="16" rx="1"/>',
   };
 
@@ -491,7 +492,7 @@
 
   const STEP_NAMES = {
     shell: '运行命令', read_file: '读取文件', write_file: '写入文件', list_files: '查看目录',
-    claude_code: '交给 Claude Code', codex: '交给 Codex', ssh: '远程命令',
+    claude_code: '交给 Claude Code', codex: '交给 Codex', ssh: '远程命令', dispatch: '派出 Worker',
   };
 
   function remember(details, key, fallback) {
@@ -541,6 +542,8 @@
     }
     const details = remember(el('details'), `s:${step.ticket_id}:${step.key}`, false);
     const summary = el('summary');
+    // A step one of the lead's sub-workers took says which one.
+    if (step.worker) summary.append(el('span', 'step-worker', step.worker));
     summary.append(icon(STEP_NAMES[step.name] ? step.name : 'think'));
     if (step.name === 'think') {
       summary.append(el('span', 'step-name', `思考了 ${step.input || 1} 秒`));
@@ -575,7 +578,10 @@
     const current = [...steps].reverse().find((s) => s.status === 'running');
     let label;
     const busy = { claude_code: 'Claude Code 正在处理…', codex: 'Codex 正在处理…' };
+    const dispatching = steps.find((s) => s.name === 'dispatch' && s.status === 'running');
+    if (dispatching) busy.dispatch = `${(dispatching.output || '').split('\n').filter(Boolean).length} 个 Worker 正在同时干活…`;
     if (asking) label = '等你批准一条远程命令';
+    else if (dispatching) label = busy.dispatch;
     else if (current) label = busy[current.name] || `正在${STEP_NAMES[current.name] || '处理'}…`;
     else if (thinking) label = '思考中…';
     else label = counted ? `已执行 ${counted} 个步骤` : '已思考';
@@ -960,6 +966,7 @@
     const row = (label, value) => { if (value) detail.append(el('dt', '', label), el('dd', '', value)); };
     if (w.current) row('当前步骤', `${STEP_NAMES[w.current.name] || w.current.name}  ${w.current.input}`);
     if (live && !w.busy) row('状态', '这一轮做完了，等下一条消息或回答');
+    if (w.crew) row('子 Worker', `${w.crew} 个正在同时干活`);
     if (w.started_at) row(live ? '已运行' : '用时', duration(w.started_at, live ? null : w.ended_at));
     const used = Object.entries(toolsUsed(w.steps)).map(([k, n]) => `${TOOL_NAMES[k] || k} ${n}`).join(' · ');
     row('用到', used);
@@ -1010,6 +1017,25 @@
       box.append(row, ...(items.length ? items.map((w) => workerCard(w, live)) : [el('p', 'hint', '没有。')]));
     };
     group('运行中', 'RUNNING', 'working', page.running, true);
+    if ((page.crew || []).length || page.crew_waiting) {
+      const row = el('div', 'group-row working');
+      row.append(el('h3', 'group', `子 Worker ${pad((page.crew || []).length)}`), en('CREW'));
+      box.append(row);
+      if (page.crew_waiting) box.append(el('p', 'hint', `还有 ${page.crew_waiting} 个在排队等空位。`));
+      for (const c of page.crew || []) {
+        const item = el('article', 'card notched worker busy crew');
+        const top = el('div', 'card-top');
+        top.append(el('span', 'ticket-id', c.label), el('span', 'stage', '干活中'));
+        const detail = el('dl', 'detail');
+        const row2 = (label, value) => { if (value) detail.append(el('dt', '', label), el('dd', '', value)); };
+        row2('属于', c.title);
+        row2('任务', c.task);
+        if (c.step) row2('当前步骤', `${STEP_NAMES[c.step.name] || c.step.name}  ${c.step.input}`);
+        row2('已运行', duration(c.started_at));
+        item.append(top, detail);
+        box.append(item);
+      }
+    }
     group('最近', 'RECENT', 'ended', page.recent, false);
     // While the page is open it keeps itself current.
     workersTimer = setTimeout(() => {

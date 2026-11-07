@@ -29,6 +29,7 @@ from continuum.policy.effects import policy_effects
 from continuum.policy.gate import RulePolicy
 
 from .accounts import Accounts
+from .crew import Crew
 from .projects import Projects, project_of_thread, zone
 from .ssh import SshHosts
 from .effects import Effects
@@ -111,6 +112,8 @@ class Runtime:
             self.executor.project_for = self.project_for_ticket
             self.executor.projects = self.projects
             self.executor.context.projects = ProjectDesk(self)
+            self.crew = Crew(self.settings.executor.max_workers)
+            self.executor.context.crew = self.crew
             self.router.projects = self.executor.context.projects
             self.router.bind(self.engine)
             self.executor.bind(self.engine)

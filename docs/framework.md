@@ -209,3 +209,12 @@ kind = "claude_code"        # 或 "codex"
   在项目里说的话和定时任务不再经过这一步，直接是这个项目的一次运行。
 
 接口：`GET /api/v1/messages`（全部消息，带 `project`）、`GET /api/v1/steps`、`GET /api/v1/projects`、`POST /api/v1/projects/{id}/confirm|refuse|pause|resume|end`、`PUT /api/v1/me/timezone`。
+
+## 项目负责人和子 Worker
+
+每个项目的第一个 Worker 就是它的负责人。能拆成互不依赖、可以同时做的几部分时（查多台服务器、比较多个方案、处理多个文件），
+负责人用 `dispatch` 一次派出多个子 Worker（一次最多 12 个），等它们都做完，检查、补做、汇总成一个答复再汇报；简单的事自己做。
+
+- 子 Worker 有和负责人一样的做事工具（shell、文件、SSH、Claude Code / Codex），没有和人对话的工具；做完用 `finish` 把结果交回。
+  它们共用项目的工作区，各自的文件放在 `/work/sub-<n>/`；它们的步骤显示在对话里，标着是哪个子 Worker。
+- 所有项目的子 Worker 共用 `[executor] max_workers` 个名额（默认 3，服务器上设为 30），多出来的排队；Worker 页列出正在干活的子 Worker。

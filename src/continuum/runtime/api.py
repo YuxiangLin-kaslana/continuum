@@ -349,9 +349,15 @@ def create_app(rt: Runtime) -> FastAPI:
             for name, n in per_ticket.items():
                 tools[name] = tools.get(name, 0) + n
         ended = [{**r, "steps": counts.get(r["ticket_id"], {})} for r in rows if r["state"] == "ended"][:20]
+        # The sub-workers the leads have sent out, with what each is on now.
+        titles = {t.id: t.title for t in tickets}
+        crew = [{**c, "title": titles.get(c["ticket_id"], "")} for c in rt.crew.of(set(titles))]
+        for row in running:
+            row["crew"] = sum(1 for c in crew if c["ticket_id"] == row["ticket_id"])
         return {
             "executor": rt.settings.executor.kind, "max_workers": rt.settings.executor.max_workers,
-            "busy_now": sum(1 for r in running if r["busy"]),
+            "busy_now": sum(1 for r in running if r["busy"]) + len(crew), "crew": crew,
+            "crew_waiting": rt.crew.waiting,
             "totals": {"assignments": len(rows), "tickets": len(tickets), "running": len(running),
                        "waiting": sum(1 for r in running if not r["busy"]), "pending": sum(
                            1 for r in rows if r["state"] == "pending")},
