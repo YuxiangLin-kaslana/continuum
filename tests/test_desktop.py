@@ -132,7 +132,17 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         assert "正在运行命令" in page.inner_text(".work.running summary")
         page.evaluate("window.__fake.release()")
         page.wait_for_selector(".work .step.shell.done >> text=ls /work")
-        page.wait_for_selector(".msg.streaming")
+        try:
+            page.wait_for_selector(".msg.streaming")
+        except Exception:
+            # Seen only on CI, never here: say what the page and the stand-in had, for the next look.
+            print("streaming not shown:", page.evaluate("""() => JSON.stringify({
+                view: document.querySelector('#view-chat').hidden ? 'not chat' : 'chat',
+                streaming: document.querySelectorAll('.msg.streaming').length,
+                running: document.querySelectorAll('.work.running').length,
+                last: window.__fake.messages.slice(-3).map((m) => `${m.role}:${m.ticket_id}:${m.text.slice(0, 16)}`),
+                steps: window.__fake.steps.slice(-2).map((s) => `${s.ticket_id}:${s.key}:${s.status}`)})"""))
+            raise
         page.wait_for_function("document.querySelector('.msg.streaming').textContent.includes('/work/report.md')")
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-streaming.png")
