@@ -22,6 +22,11 @@
     messages.push(row);
     return row;
   };
+  const APPROVALS = { ask: '每条命令都先问你', read: '只读命令直接执行，改动先问你', auto: '直接执行' };
+  const sshHosts = [
+    { name: 'andrew', address: '10.128.0.20', port: 22, user: 'Yuxia', jump: null, approval: 'ask', note: '',
+      approval_text: APPROVALS.ask, state: {} },
+  ];
   const steps = [];
   let nextStep = 1;
   const step = (thread, ticket, key, name, input, status, output = '') => {
@@ -100,6 +105,33 @@
     },
     steps: (thread) => ok(steps.filter((x) => x.thread === thread).map((x) => ({ ...x }))),
     tickets: () => ok(tickets),
+    // SSH servers, as an admin sees them; a host whose address starts with 10. times out, as from another cloud.
+    ssh: () => ok({ admin: true, public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAvfSbnyut continuum@ai-api.yuxianglin.xyz',
+      fingerprint: 'SHA256:PJAca3IkzE4nJ7pqzN49pMQAw37wQF02BDE1ofh2Hjc', hosts: sshHosts.map((h) => ({ ...h })),
+      approvals: APPROVALS, source_address: '13.134.76.110' }),
+    sshSave: (name, host) => {
+      if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(name)) return Promise.resolve({ ok: false, status: 422, error: '名字只能用小写字母、数字和 -，最长 40 个字符' });
+      if (host.jump && !sshHosts.some((h) => h.name === host.jump)) return Promise.resolve({ ok: false, status: 422, error: `没有叫 ${host.jump} 的跳板` });
+      const row = { name, port: 22, approval: 'ask', jump: null, note: '', ...host, state: {} };
+      row.approval_text = APPROVALS[row.approval];
+      const at = sshHosts.findIndex((h) => h.name === name);
+      if (at >= 0) sshHosts[at] = row; else sshHosts.push(row);
+      sshHosts.sort((a, b) => a.name.localeCompare(b.name));
+      return ok({ ...row });
+    },
+    sshDelete: (name) => {
+      if (sshHosts.some((h) => h.jump === name)) return Promise.resolve({ ok: false, status: 409, error: `${sshHosts.filter((h) => h.jump === name).map((h) => h.name).join(', ')} 还经过它跳转，先改掉它们` });
+      sshHosts.splice(sshHosts.findIndex((h) => h.name === name), 1);
+      return ok({ deleted: name });
+    },
+    sshTest: (name) => new Promise((resolve) => setTimeout(() => {
+      const h = sshHosts.find((x) => x.name === name);
+      const direct = h.address.startsWith('10.') && !h.jump;
+      h.state = direct
+        ? { ok: false, tested_at: now(), message: '连接超时：地址从这台服务器到不了（内网地址、防火墙没放行、或者机器没开）', fingerprint: null }
+        : { ok: true, tested_at: now(), message: `${name}-box`, fingerprint: 'SHA256:q3Xc9y0w1pZcF8kT2b1A0Tn9d6Q (ED25519)' };
+      resolve({ ok: true, data: { ...h, seconds: 0.4 } });
+    }, 150)),
     stop: (id) => {
       const t = tickets.find((x) => x.id === id);
       Object.assign(t, { stage: 'ended', action: null, outcome: 'stopped', question: null });

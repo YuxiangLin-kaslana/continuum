@@ -12,11 +12,13 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from continuum.core.errors import UserError
 from continuum.core.model import ActorRef, Ticket
 from continuum.core.stage import can_retry, ticket_stage
+
+from .ssh import APPROVALS, Host
 
 if TYPE_CHECKING:
     from .app import Runtime
@@ -193,6 +195,53 @@ def create_app(rt: Runtime) -> FastAPI:
             return ticket_view(rt.engine.retry_ticket(ticket_id))
         except UserError as error:
             raise refused(error) from None
+
+    # --- SSH servers: only for the users named in [ssh] admins ---
+
+    def ssh_admin(user: str) -> None:
+        if user not in rt.settings.ssh.admins:
+            raise HTTPException(403, "只有管理员能管理 SSH 服务器（[ssh] admins）")
+
+    def ssh_view(host: dict[str, Any]) -> dict[str, Any]:
+        return {**host, "approval_text": APPROVALS.get(host.get("approval", "ask"), "")}
+
+    @app.get("/api/v1/ssh")
+    async def ssh_list(user: str = Depends(user_of)) -> dict[str, Any]:
+        admin = user in rt.settings.ssh.admins
+        if not admin:
+            return {"admin": False, "hosts": [], "public_key": None, "fingerprint": None}
+        return {"admin": True, **rt.ssh.public_key(), "hosts": [ssh_view(h) for h in rt.ssh.list()],
+                "approvals": APPROVALS, "source_address": rt.settings.ssh.source_address}
+
+    @app.put("/api/v1/ssh/hosts/{name}")
+    async def ssh_save(name: str, body: dict[str, Any], user: str = Depends(user_of)) -> dict[str, Any]:
+        ssh_admin(user)
+        try:
+            host = Host.model_validate({**body, "name": name})
+            return ssh_view(rt.ssh.put(host))
+        except ValidationError as error:
+            raise HTTPException(422, "；".join(e["msg"].removeprefix("Value error, ") for e in error.errors())) \
+                from None
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
+
+    @app.delete("/api/v1/ssh/hosts/{name}")
+    async def ssh_delete(name: str, user: str = Depends(user_of)) -> dict[str, Any]:
+        ssh_admin(user)
+        try:
+            if not rt.ssh.delete(name):
+                raise HTTPException(404, "没有这台服务器")
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from None
+        return {"deleted": name}
+
+    @app.post("/api/v1/ssh/hosts/{name}/test")
+    async def ssh_test(name: str, user: str = Depends(user_of)) -> dict[str, Any]:
+        ssh_admin(user)
+        try:
+            return ssh_view(await rt.ssh.test(name))
+        except KeyError:
+            raise HTTPException(404, "没有这台服务器") from None
 
     @app.websocket("/api/v1/stream")
     async def stream(socket: WebSocket, token: str | None = None) -> None:

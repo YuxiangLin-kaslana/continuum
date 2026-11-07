@@ -136,7 +136,7 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
 
         # Tickets: what waits for a person comes first, and a stop asks once more before it acts.
         page.click("#tab-tickets")
-        assert page.locator(".group").all_inner_texts() == ["等你处理 01", "执行中 01", "已结束 01"]
+        assert page.locator("#tickets .group").all_inner_texts() == ["等你处理 01", "执行中 01", "已结束 01"]
         assert "0402 还是 0603" in page.inner_text(".card.person .question")
         if SHOTS:
             page.wait_for_timeout(400)
@@ -151,5 +151,73 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         page.locator(".card.person").get_by_role("button", name="去回答").click()
         page.wait_for_function("document.querySelector('#thread-title').textContent === '主对话'")
         assert page.is_visible("#view-chat") and page.locator(".msg").count() == 5 and page.locator(".work").count() == 2
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.skipif(_browser() is None, reason="needs playwright")
+def test_the_settings_page_adds_tests_and_removes_ssh_servers():
+    sync_playwright = _browser()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        context = browser.new_context(viewport={"width": 520, "height": 780}, bypass_csp=True)
+        context.grant_permissions(["clipboard-read", "clipboard-write"])
+        page = context.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.add_init_script(path=str(DESKTOP / "test" / "fake-bridge.js"))
+        page.goto((DESKTOP / "renderer" / "index.html").as_uri())
+        page.wait_for_selector("#app[data-ready]")
+        page.fill("#username", "me")
+        page.fill("#password", "good-password")
+        page.click("#connect")
+        page.wait_for_selector("#main:not([hidden])")
+
+        page.click("#settings")
+        page.wait_for_selector("#ssh-admin:not([hidden])")
+        assert page.inner_text("#ssh-key").startswith("ssh-ed25519 ")
+        assert page.inner_text("#ssh-line").startswith('from="13.134.76.110",no-agent-forwarding')
+        page.click("#ssh-copy-line")
+        assert page.evaluate("navigator.clipboard.readText()").startswith('from="13.134.76.110"')
+
+        # A GCP address straight from AWS: the test says why it cannot connect.
+        page.click(".card.host[data-host=andrew] >> text=测试连接")
+        page.wait_for_selector(".card.host.bad[data-host=andrew]")
+        assert "连接超时" in page.inner_text(".card.host[data-host=andrew]")
+
+        # Add a jump host, then send andrew through it.
+        page.click("#ssh-add")
+        page.fill("#ssh-name", "Bad Name")
+        page.fill("#ssh-address", "34.1.2.3")
+        page.fill("#ssh-user", "Yuxia")
+        page.click("#ssh-save")
+        assert "名字只能用" in page.inner_text("#ssh-error")
+        page.fill("#ssh-name", "bastion")
+        page.select_option("#ssh-approval", "read")
+        page.click("#ssh-save")
+        page.wait_for_selector("#ssh-form", state="hidden")
+        assert "只读命令直接执行" in page.inner_text(".card.host[data-host=bastion]")
+        page.click(".card.host[data-host=andrew] >> text=编辑")
+        assert page.get_attribute("#ssh-name", "readonly") is not None
+        page.select_option("#ssh-jump", "bastion")
+        page.click("#ssh-save")
+        page.wait_for_selector("#ssh-form", state="hidden")
+        page.click(".card.host[data-host=andrew] >> text=测试连接")
+        page.wait_for_selector(".card.host.ok[data-host=andrew]")
+        assert "经过跳板" in page.inner_text(".card.host[data-host=andrew]")
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-settings.png", full_page=True)
+
+        # A jump host in use is not removed; once nothing goes through it, it is (after a second click).
+        page.click(".card.host[data-host=bastion] >> text=删除")
+        page.click(".card.host[data-host=bastion] >> text=确认删除？")
+        page.wait_for_selector("#status:not([hidden])")
+        assert "还经过它跳转" in page.inner_text("#status")
+        page.click(".card.host[data-host=andrew] >> text=删除")
+        page.click(".card.host[data-host=andrew] >> text=确认删除？")
+        page.wait_for_selector(".card.host[data-host=andrew]", state="detached")
+
+        page.click("#settings")
+        assert page.is_visible("#view-chat") and not page.is_visible("#view-settings")
         assert errors == []
         browser.close()

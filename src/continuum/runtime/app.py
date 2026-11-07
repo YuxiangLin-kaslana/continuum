@@ -27,6 +27,7 @@ from continuum.policy.effects import policy_effects
 from continuum.policy.gate import RulePolicy
 
 from .accounts import Accounts
+from .ssh import SshHosts
 from .effects import Effects
 from .executor import InProcessExecutor
 from .outbox import StoreOutbox
@@ -78,6 +79,7 @@ class Runtime:
             self.problems: list[str] = list(self.registry.problems)
             self.store = SQLiteStore(self.home / "continuum.db")
             self.accounts = Accounts(self.store)
+            self.ssh = SshHosts(self.store, self.home, self.settings.ssh)
             self._wake = asyncio.Event()
             self.effects = Effects(self.store, on_enqueue=self.poke)
             self.sources = self._sources()

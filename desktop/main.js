@@ -178,6 +178,11 @@ handle('api:post', (thread, text) =>
 handle('api:steps', (thread) =>
   client.request('GET', `/api/v1/threads/${encodeURIComponent(thread)}/steps`));
 handle('api:tickets', () => client.request('GET', '/api/v1/tickets'));
+handle('api:ssh', () => client.request('GET', '/api/v1/ssh'));
+handle('api:sshSave', (name, host) =>
+  client.request('PUT', `/api/v1/ssh/hosts/${encodeURIComponent(name)}`, host));
+handle('api:sshDelete', (name) => client.request('DELETE', `/api/v1/ssh/hosts/${encodeURIComponent(name)}`));
+handle('api:sshTest', (name) => client.request('POST', `/api/v1/ssh/hosts/${encodeURIComponent(name)}/test`));
 handle('api:stop', (id) => client.request('POST', `/api/v1/tickets/${encodeURIComponent(id)}/stop`, {}));
 handle('api:retry', (id) => client.request('POST', `/api/v1/tickets/${encodeURIComponent(id)}/retry`));
 

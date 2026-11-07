@@ -41,6 +41,17 @@ class ApiSettings(_Strict):
     port: int = Field(default=8170, ge=0, le=65535)
 
 
+class SshSettings(_Strict):
+    # The private key Continuum connects with; its .pub is shown on the settings page.
+    key: str = "~/.ssh/continuum_ed25519"
+    # Who may see and change the list of servers.
+    admins: list[str] = []
+    ssh_command: str = "ssh"
+    # The address servers see Continuum connect from: the settings page puts it in the suggested from="…" limit.
+    source_address: str | None = None
+    connect_timeout_seconds: int = Field(default=10, ge=1, le=120)
+
+
 class Settings(_Strict):
     policy: PolicyConfig = PolicyConfig()
     # The gate rules, in the order they are asked; `standard` is dsh-superagent's gate.
@@ -49,6 +60,7 @@ class Settings(_Strict):
     executor: ExecutorSettings = ExecutorSettings()
     sources: dict[str, SourceInstance] = {"cli": SourceInstance(kind="cli")}
     api: ApiSettings = ApiSettings()
+    ssh: SshSettings = SshSettings()
     # Chat models by name, for the router and the agent executor.
     models: dict[str, ModelSettings] = {}
     # Seconds between passes when nothing pokes the scheduler.

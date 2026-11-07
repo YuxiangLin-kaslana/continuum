@@ -237,7 +237,10 @@
     }
     $('view-chat').hidden = view !== 'chat';
     $('view-tickets').hidden = view !== 'tickets';
+    $('view-settings').hidden = view !== 'settings';
+    $('settings').setAttribute('aria-pressed', String(view === 'settings'));
     if (view === 'chat') $('input').focus();
+    if (view === 'settings') loadSsh();
   }
   for (const button of document.querySelectorAll('.tabs button')) {
     button.addEventListener('click', () => setView(button.dataset.view));
@@ -626,6 +629,172 @@
     $('badge').hidden = waiting === 0;
     $('badge').textContent = String(waiting);
   }
+
+  // --- settings: the SSH servers Continuum may reach ---
+
+  const ssh = { hosts: [], approvals: {}, editing: null, key: '', line: '' };
+  $('settings').addEventListener('click', () => setView(state.view === 'settings' ? 'chat' : 'settings'));
+
+  async function loadSsh() {
+    let page;
+    try {
+      page = await call('ssh');
+    } catch (error) {
+      showStatus(error.message);
+      return;
+    }
+    $('ssh-locked').hidden = page.admin;
+    $('ssh-admin').hidden = !page.admin;
+    if (!page.admin) return;
+    ssh.hosts = page.hosts;
+    ssh.approvals = page.approvals || {};
+    ssh.key = page.public_key || '';
+    const limits = 'no-agent-forwarding,no-port-forwarding,no-X11-forwarding';
+    ssh.line = ssh.key ? `${page.source_address ? `from="${page.source_address}",` : ''}${limits} ${ssh.key}` : '';
+    $('ssh-key').textContent = ssh.key || '服务器上还没有 Continuum 的密钥（[ssh] key）。';
+    $('ssh-line').textContent = ssh.line;
+    $('ssh-fp').textContent = page.fingerprint || '';
+    renderSsh();
+  }
+
+  async function copy(text, button) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Without clipboard access, select the text so it can be copied by hand.
+      const range = document.createRange();
+      range.selectNodeContents(button.closest('.card').querySelector('.key'));
+      getSelection().removeAllRanges();
+      getSelection().addRange(range);
+    }
+    const label = button.textContent;
+    button.textContent = '已复制';
+    setTimeout(() => { button.textContent = label; }, 1200);
+  }
+  $('ssh-copy-key').addEventListener('click', (event) => copy(ssh.key, event.currentTarget));
+  $('ssh-copy-line').addEventListener('click', (event) => copy(ssh.line, event.currentTarget));
+
+  function hostCard(h) {
+    const st = h.state || {};
+    const kind = st.ok === true ? 'ok' : st.ok === false ? 'bad' : 'untested';
+    const box = el('article', `card notched host ${kind}`);
+    box.dataset.host = h.name;
+    const top = el('div', 'card-top');
+    const where = el('span', 'ticket-id', `${h.user}@${h.address}${h.port === 22 ? '' : `:${h.port}`}`);
+    top.append(where, el('span', 'stage', { ok: '已连通', bad: '连不上', untested: '还没测试' }[kind]));
+    box.append(top, el('div', 'card-title', h.name));
+    const detail = el('dl', 'detail');
+    const row = (label, value, cls = '') => { if (value) detail.append(el('dt', '', label), el('dd', cls, value)); };
+    row('经过跳板', h.jump);
+    row('执行权限', h.approval_text || ssh.approvals[h.approval]);
+    row('上次测试', st.message, st.ok === false ? 'question' : 'summary');
+    row('主机指纹', st.fingerprint);
+    row('备注', h.note);
+    box.append(detail);
+    const foot = el('div', 'card-foot');
+    if (st.tested_at) {
+      const when = el('span', 'meta-item');
+      when.append(icon('calendar'), el('span', '', `${day(st.tested_at)} ${time(st.tested_at)}`));
+      foot.append(when);
+    }
+    const actions = el('div', 'actions');
+    const test = el('button', 'outline', '测试连接');
+    test.addEventListener('click', async () => {
+      test.disabled = true;
+      test.textContent = '测试中…';
+      try {
+        const tested = await call('sshTest', h.name);
+        ssh.hosts = ssh.hosts.map((x) => (x.name === h.name ? tested : x));
+        renderSsh();
+      } catch (error) {
+        showStatus(error.message);
+        test.disabled = false;
+        test.textContent = '测试连接';
+      }
+    });
+    const edit = el('button', 'outline', '编辑');
+    edit.addEventListener('click', () => openForm(h));
+    const remove = el('button', 'outline danger', '删除');
+    remove.addEventListener('click', async () => {
+      if (!remove.dataset.confirm) {
+        remove.dataset.confirm = '1';
+        remove.textContent = '确认删除？';
+        return;
+      }
+      try {
+        await call('sshDelete', h.name);
+        ssh.hosts = ssh.hosts.filter((x) => x.name !== h.name);
+        renderSsh();
+        showStatus('');
+      } catch (error) {
+        showStatus(error.message);
+      }
+    });
+    actions.append(test, edit, remove);
+    foot.append(actions);
+    box.append(foot);
+    return box;
+  }
+
+  function renderSsh() {
+    $('ssh-hosts').replaceChildren(...ssh.hosts.map(hostCard));
+    $('ssh-empty').hidden = ssh.hosts.length > 0 || !$('ssh-form').hidden;
+  }
+
+  function openForm(host) {
+    ssh.editing = host ? host.name : null;
+    $('ssh-form-title').textContent = host ? `编辑 ${host.name}` : '添加服务器';
+    $('ssh-name').value = host ? host.name : '';
+    $('ssh-name').readOnly = Boolean(host);
+    $('ssh-address').value = host ? host.address : '';
+    $('ssh-port').value = host ? host.port : 22;
+    $('ssh-user').value = host ? host.user : '';
+    $('ssh-note').value = host ? host.note || '' : '';
+    const jumps = ssh.hosts.filter((h) => !host || h.name !== host.name);
+    $('ssh-jump').replaceChildren(el('option', '', '不用跳板，直接连'),
+      ...jumps.map((h) => Object.assign(el('option', '', `${h.name}（${h.address}）`), { value: h.name })));
+    $('ssh-jump').firstChild.value = '';
+    $('ssh-jump').value = host && host.jump ? host.jump : '';
+    $('ssh-approval').replaceChildren(...Object.entries(ssh.approvals)
+      .map(([value, text]) => Object.assign(el('option', '', text), { value })));
+    $('ssh-approval').value = host ? host.approval : 'ask';
+    $('ssh-error').hidden = true;
+    $('ssh-form').hidden = false;
+    $('ssh-add').hidden = true;
+    renderSsh();
+    $('ssh-form').scrollIntoView({ block: 'nearest' });
+    (host ? $('ssh-address') : $('ssh-name')).focus();
+  }
+
+  function closeForm() {
+    $('ssh-form').hidden = true;
+    $('ssh-add').hidden = false;
+    ssh.editing = null;
+    renderSsh();
+  }
+
+  $('ssh-add').addEventListener('click', () => openForm(null));
+  $('ssh-cancel').addEventListener('click', closeForm);
+  $('ssh-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const name = $('ssh-name').value.trim();
+    const host = {
+      address: $('ssh-address').value.trim(), port: Number($('ssh-port').value) || 22,
+      user: $('ssh-user').value.trim(), jump: $('ssh-jump').value || null, approval: $('ssh-approval').value,
+      note: $('ssh-note').value.trim(),
+    };
+    $('ssh-save').disabled = true;
+    try {
+      const saved = await call('sshSave', name, host);
+      ssh.hosts = [...ssh.hosts.filter((x) => x.name !== name), saved].sort((a, b) => a.name.localeCompare(b.name));
+      closeForm();
+    } catch (error) {
+      $('ssh-error').textContent = error.message;
+      $('ssh-error').hidden = false;
+    } finally {
+      $('ssh-save').disabled = false;
+    }
+  });
 
   // --- live events ---
 
