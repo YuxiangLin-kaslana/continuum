@@ -264,10 +264,10 @@ def test_nothing_in_a_conversation_scrolls_sideways_and_markdown_renders(width):
         else:  # narrow: the channel list is folded away
             page.evaluate("document.querySelector('#threads button[data-thread=wide]').click()")
         page.wait_for_selector(".msg.reply.rich table")
-        page.click(".work summary")
-        for step in page.locator(".work .step.shell summary").all():
-            step.click()
+        # Open every step, the widest the conversation gets (this test is about layout, not about clicking).
+        page.evaluate("document.querySelectorAll('#messages details').forEach((d) => { d.open = true; })")
         page.wait_for_selector(".step-command")
+        assert page.locator(".step-command").count() == 2
 
         # Markdown: what it reads, and what it leaves as text.
         reply = page.locator(".msg.reply .bubble")
