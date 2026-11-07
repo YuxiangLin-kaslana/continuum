@@ -41,7 +41,14 @@
   add('bom', 'user', '列一下 R12 的两家报价');
   add('bom', 'reply', '#### R12 报价对比\n| 供应商 | 封装 | 单价 |\n|---|---|---|\n| 甲 | 0402 | **0.012** |\n| 乙 | 0603 | 0.010 |\n- 差价 12%\n- <b>未</b>含运费');
 
-  window.__fake = { fire, messages, tickets, steps };
+  // A test can hold a turn at its steps (`hold`), then let it go on one step at a time (`release()`).
+  // A release that comes before the turn reaches its pause is kept, so the turn goes straight on.
+  let held = null;
+  let released = 0;
+  window.__fake = { fire, messages, tickets, steps, hold: false, release: () => {
+    if (held) held(); else released++;
+    held = null;
+  } };
   window.continuum = {
     getConfig: () => ok({ server: 'https://continuum.example.com', user: configured ? 'me' : '', configured,
       connection: configured ? 'online' : 'offline' }),
@@ -61,23 +68,34 @@
       // A turn as the server streams it: acknowledged, thinking, a command run, the answer written as it comes.
       const ticket = `t-${row.id}`;
       const answer = `已处理「${text}」\n- 交期变化 **2** 处\n- 已写入 \`/work/report.md\``;
-      const at = (ms, fn) => setTimeout(fn, ms);
       const live = (event) => fire('event', { ...event, ticket_id: ticket, thread });
-      at(30, () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      // Held, the turn stops while the command runs and again while the answer is half written, until released.
+      const pause = () => {
+        if (!window.__fake.hold) return Promise.resolve();
+        if (released) { released--; return Promise.resolve(); }
+        return new Promise((resolve) => { held = resolve; });
+      };
+      (async () => {
+        await wait(30);
         fire('event', { type: 'message', message: add(thread, 'acknowledgement', `收到，开始处理：${text}`, ticket) });
         live({ type: 'thinking' });
-      });
-      at(120, () => fire('event', { type: 'step', step: step(thread, ticket, 'a', 'shell', 'ls /work', 'running') }));
-      at(260, () => fire('event', { type: 'step',
-        step: step(thread, ticket, 'a', 'shell', 'ls /work', 'done', '[exit code 0]\nbom.csv\nleadtimes.csv') }));
-      at(300, () => live({ type: 'thinking' }));
-      for (let n = 4, ms = 360; n <= answer.length; n += 4, ms += 25) {
-        at(ms, () => live({ type: 'stream', text: answer.slice(0, n) }));
-      }
-      at(380 + answer.length * 7, () => {
+        await wait(90);
+        fire('event', { type: 'step', step: step(thread, ticket, 'a', 'shell', 'ls /work', 'running') });
+        await wait(140);
+        await pause();
+        fire('event', { type: 'step',
+          step: step(thread, ticket, 'a', 'shell', 'ls /work', 'done', '[exit code 0]\nbom.csv\nleadtimes.csv') });
+        live({ type: 'thinking' });
+        await wait(60);
+        for (let n = 4; n < answer.length + 4; n += 4) {
+          live({ type: 'stream', text: answer.slice(0, n) });
+          await wait(25);
+        }
+        await pause();
         fire('event', { type: 'message', message: add(thread, 'reply', answer, ticket) });
         live({ type: 'idle' });
-      });
+      })();
       return ok(row);
     },
     steps: (thread) => ok(steps.filter((x) => x.thread === thread).map((x) => ({ ...x }))),

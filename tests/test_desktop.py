@@ -99,13 +99,18 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
 
         # A message: its acknowledgement, the worker thinking and running a command as it happens, then the answer
         # written as it comes, which gives way to the reply itself.
+        page.evaluate("window.__fake.hold = true")
         page.fill("#input", "顺便核一下交期")
         page.press("#input", "Enter")
-        page.wait_for_selector(".work.running")
+        page.wait_for_selector(".work.running .step.shell.running >> text=ls /work")
+        assert "正在运行命令" in page.inner_text(".work.running summary")
+        page.evaluate("window.__fake.release()")
         page.wait_for_selector(".work .step.shell.done >> text=ls /work")
         page.wait_for_selector(".msg.streaming")
+        page.wait_for_function("document.querySelector('.msg.streaming').textContent.includes('/work/report.md')")
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-streaming.png")
+        page.evaluate("window.__fake.hold = false; window.__fake.release()")
         page.wait_for_selector(".msg.reply:not(.streaming)")
         assert page.locator(".msg.streaming").count() == 0 and page.locator(".work.running").count() == 0
         roles = [c.split()[1] for c in page.locator(".msg").evaluate_all("ns => ns.map(n => n.className)")]
