@@ -36,6 +36,10 @@ class LoginRequest(BaseModel):
     device: str = Field(default="", max_length=80)
 
 
+class ApprovalRequest(BaseModel):
+    approve: bool
+
+
 class Throttle:
     """Failed logins per user and per client address: after `limit` failures in `window` seconds, refuse for the
     rest of the window. Kept in memory; a restart clears it."""
@@ -242,6 +246,16 @@ def create_app(rt: Runtime) -> FastAPI:
             return ssh_view(await rt.ssh.test(name))
         except KeyError:
             raise HTTPException(404, "没有这台服务器") from None
+
+    @app.post("/api/v1/approvals/{ticket_id}/{key}")
+    async def approve(ticket_id: str, key: str, body: ApprovalRequest, user: str = Depends(user_of)) \
+            -> dict[str, Any]:
+        """A person's answer to a command a worker wants to run on one of their servers."""
+        ticket_of(user, ticket_id)
+        ssh_admin(user)
+        if not rt.ssh.approvals.decide(ticket_id, key, body.approve):
+            raise HTTPException(404, "这条命令已经不在等批准了")
+        return {"decided": "approved" if body.approve else "refused"}
 
     @app.websocket("/api/v1/stream")
     async def stream(socket: WebSocket, token: str | None = None) -> None:

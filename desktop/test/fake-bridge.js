@@ -28,6 +28,7 @@
       approval_text: APPROVALS.ask, state: {} },
   ];
   const steps = [];
+  const approvals = {};
   let nextStep = 1;
   const step = (thread, ticket, key, name, input, status, output = '') => {
     let row = steps.find((x) => x.ticket_id === ticket && x.key === key);
@@ -94,6 +95,21 @@
         if (released) { released--; return Promise.resolve(); }
         return new Promise((resolve) => { held = resolve; });
       };
+      if (text.includes('重启')) {
+        // A command on a server that waits for the person's approval, then runs (or does not).
+        (async () => {
+          await wait(30);
+          fire('event', { type: 'message', message: add(thread, 'acknowledgement', `收到，开始处理：${text}`, ticket) });
+          const input = 'web  $ systemctl restart nginx';
+          fire('event', { type: 'step', step: step(thread, ticket, 'r', 'ssh', input, 'approval', 'nginx 没在跑，重启一下') });
+          const approve = await new Promise((resolve) => { approvals[`${ticket}:r`] = resolve; });
+          fire('event', { type: 'step', step: step(thread, ticket, 'r', 'ssh', input, approve ? 'done' : 'error',
+            approve ? '[exit code 0]\n' : '人拒绝了这条命令') });
+          fire('event', { type: 'message', message: add(thread, 'reply', approve ? '已重启 nginx。' : '你拒绝了，没有重启。', ticket) });
+          live({ type: 'idle' });
+        })();
+        return ok(row);
+      }
       (async () => {
         await wait(30);
         fire('event', { type: 'message', message: add(thread, 'acknowledgement', `收到，开始处理：${text}`, ticket) });
@@ -117,6 +133,13 @@
       return ok(row);
     },
     steps: (thread) => ok(steps.filter((x) => x.thread === thread).map((x) => ({ ...x }))),
+    approve: (ticketId, key, approve) => {
+      const resolve = approvals[`${ticketId}:${key}`];
+      if (!resolve) return Promise.resolve({ ok: false, status: 404, error: '这条命令已经不在等批准了' });
+      delete approvals[`${ticketId}:${key}`];
+      setTimeout(() => resolve(approve), 20);
+      return ok({ decided: approve ? 'approved' : 'refused' });
+    },
     tickets: () => ok(tickets),
     // SSH servers, as an admin sees them; a host whose address starts with 10. times out, as from another cloud.
     ssh: () => ok({ admin: true, public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAvfSbnyut continuum@ai-api.yuxianglin.xyz',

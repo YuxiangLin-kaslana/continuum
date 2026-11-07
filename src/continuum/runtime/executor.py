@@ -60,6 +60,8 @@ class Job:
         self.ticket_id = ticket.id
         self.title = ticket.title
         self.scope = ticket.mandate.scope
+        # Who the work is for: what the worker may reach on their behalf depends on it.
+        self.requester = ticket.mandate.actor.id
         self.assignment = ticket.execution.assignment if ticket.execution else ticket.title
         self.workdir = Path(ticket.execution.directory) if ticket.execution else Path(".")
         self.reports: list[ReportState] = []
@@ -198,12 +200,13 @@ class InProcessExecutor:
     def __init__(self, store: SQLiteStore, effects: Effects, home: Path, kind: ExecutorKind, config: Any,
                  scripts: dict[str, Script], max_workers: int, relay: Callable[[Relay], None],
                  paused: Callable[[], bool] = lambda: False, on_report: Callable[[str], None] | None = None,
-                 models: Any = None, on_activity: Callable[[str, dict[str, Any]], None] | None = None):
+                 models: Any = None, on_activity: Callable[[str, dict[str, Any]], None] | None = None,
+                 ssh: Any = None):
         self.store = store
         self.effects = effects
         self.home = home
         self.kind = kind
-        self.context = ExecutorContext(config=config, scripts=scripts, models=models or {})
+        self.context = ExecutorContext(config=config, scripts=scripts, models=models or {}, ssh=ssh)
         self.max_workers = max_workers
         self.relay = relay
         self.paused = paused

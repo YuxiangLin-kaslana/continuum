@@ -39,6 +39,7 @@
     think: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18 16l.7 1.8 1.8.7-1.8.7L18 21l-.7-1.8-1.8-.7 1.8-.7z"/>',
     chevron: '<path d="m9 6 6 6-6 6"/>',
     claude_code: '<path d="M4 12h11M11 7l5 5-5 5"/><rect x="16" y="4" width="5" height="16" rx="1"/>',
+    ssh: '<rect x="3" y="4" width="18" height="7" rx="1"/><rect x="3" y="13" width="18" height="7" rx="1"/><path d="M7 7.5h.01M7 16.5h.01"/>',
     codex: '<path d="M4 12h11M11 7l5 5-5 5"/><rect x="16" y="4" width="5" height="16" rx="1"/>',
   };
 
@@ -398,7 +399,7 @@
 
   const STEP_NAMES = {
     shell: '运行命令', read_file: '读取文件', write_file: '写入文件', list_files: '查看目录',
-    claude_code: '交给 Claude Code', codex: '交给 Codex',
+    claude_code: '交给 Claude Code', codex: '交给 Codex', ssh: '远程命令',
   };
 
   function remember(details, key, fallback) {
@@ -407,7 +408,40 @@
     return details;
   }
 
+  // A command on one of the person's servers that waits for them: what, where, why, and their two answers.
+  function approvalItem(step) {
+    const item = el('li', 'step ssh approval');
+    const box = el('div', 'approval-box');
+    const head = el('div', 'approval-head');
+    head.append(icon('ssh'), el('span', 'step-name', '等你批准一条远程命令'));
+    const [host, ...rest] = step.input.split('  $ ');
+    const where = el('div', 'approval-host', `服务器 ${host}`);
+    const command = el('pre', 'step-command', rest.join('  $ ') || step.input);
+    box.append(head, where, command);
+    if (step.output) box.append(el('p', 'approval-reason', `理由：${step.output}`));
+    const actions = el('div', 'actions');
+    const answer = (approve) => async () => {
+      for (const b of actions.querySelectorAll('button')) b.disabled = true;
+      try {
+        await call('approve', step.ticket_id, step.key, approve);
+        showStatus('');
+      } catch (error) {
+        showStatus(error.message);
+        for (const b of actions.querySelectorAll('button')) b.disabled = false;
+      }
+    };
+    const refuse = el('button', 'outline danger', '拒绝');
+    refuse.addEventListener('click', answer(false));
+    const run = el('button', 'outline amber', '批准执行');
+    run.addEventListener('click', answer(true));
+    actions.append(refuse, run);
+    box.append(actions);
+    item.append(box);
+    return item;
+  }
+
   function stepItem(step) {
+    if (step.status === 'approval') return approvalItem(step);
     const item = el('li', `step ${step.name} ${step.status}`);
     if (step.name === 'note') {
       item.append(el('p', 'note', step.output));
@@ -437,17 +471,20 @@
   }
 
   function workBox(ticket, steps, thinking) {
-    const running = thinking || steps.some((s) => s.status === 'running');
+    const asking = steps.some((s) => s.status === 'approval');
+    const running = thinking || asking || steps.some((s) => s.status === 'running');
     const item = el('li', `work${running ? ' running' : ''}`);
     item.dataset.ticket = ticket;
     const details = remember(el('details', 'work-box'), `w:${ticket}`, running);
     if (running) details.open = state.open.get(`w:${ticket}`) !== false;
+    if (asking) details.open = true;
     const summary = el('summary');
     const counted = steps.filter((s) => s.name !== 'note' && s.name !== 'think').length;
     const current = [...steps].reverse().find((s) => s.status === 'running');
     let label;
     const busy = { claude_code: 'Claude Code 正在处理…', codex: 'Codex 正在处理…' };
-    if (current) label = busy[current.name] || `正在${STEP_NAMES[current.name] || '处理'}…`;
+    if (asking) label = '等你批准一条远程命令';
+    else if (current) label = busy[current.name] || `正在${STEP_NAMES[current.name] || '处理'}…`;
     else if (thinking) label = '思考中…';
     else label = counted ? `已执行 ${counted} 个步骤` : '已思考';
     summary.append(el('span', running ? 'work-spin' : 'work-done'), el('span', 'work-label', label), icon('chevron'));

@@ -21,6 +21,8 @@ from continuum.core.errors import UserError
 from continuum.models import ChatModel, ModelError, partial_string, tool, tool_calls
 from continuum.plugin import ExecutorContext
 
+from continuum.runtime import ssh as ssh_rules
+
 from . import cli_agents, sandbox
 from .cli_agents import ClaudeCodeConfig, CodexConfig
 from .sandbox import SandboxConfig
@@ -76,6 +78,24 @@ DELEGATE_TOOLS = {
         {"task": {"type": "string"}, "fresh": {"type": "boolean", "description": "true 时开新会话；默认接着本工单上次的会话"}},
         required=["task"]),
 }
+# The person's own servers, reached through the host with Continuum's key: offered when the person asking may use
+# them ([ssh] admins) and there are any.
+SSH_TOOLS = [
+    tool("ssh_hosts", "列出你可以连的服务器：名字、地址、登录用户、执行权限、上次测试是否连通。", {}, required=[]),
+    tool("ssh", "在一台登记过的服务器上执行一条 shell 命令，由 Continuum 代为执行，返回退出码和输出。"
+         "按这台服务器的执行权限，命令可能直接执行，也可能要等人批准（人可能拒绝）。"
+         "reason 用一句话告诉人为什么要执行它。",
+         {"host": {"type": "string", "description": "ssh_hosts 里的名字"}, "command": {"type": "string"},
+          "reason": {"type": "string"}}, required=["host", "command", "reason"]),
+]
+SSH_RULES = """
+你还能用 ssh_hosts / ssh 在人登记过的服务器上执行命令（它们不在你的沙箱里，由 Continuum 代为连接）。
+先用 ssh_hosts 看清单。尽量用只读命令；会改东西的命令（重启、改文件、装包、删除）只在请求需要时用，reason 写清楚，
+人批准后才会执行；被拒绝就不要换个写法再试，向人说明。不要读取或输出私钥、密码等机密。
+"""
+APPROVAL_TIMEOUT = 30 * 60
+SSH_COMMAND_TIMEOUT = 300
+
 DELEGATING = """
 你还有编程助手可用（{names}）：较大的编程工作交给它们，你负责拆解任务、写清楚 task、检查它们的结果（看文件、跑一下），
 再向人汇报。它们和你用同一个工作区；简单的命令自己跑就行，不用交给它们。
@@ -83,7 +103,7 @@ DELEGATING = """
 ENDS_TURN = {"ready", "blocked", "failed", "dropped"}
 # The tools whose work a person sees as steps of the turn; the rest are the worker's calls to the host, whose words
 # reach the person as messages.
-SHOWN = {"shell", "read_file", "write_file", "list_files", "claude_code", "codex"}
+SHOWN = {"shell", "read_file", "write_file", "list_files", "claude_code", "codex", "ssh"}
 SHOWN_OUTPUT = 4000
 
 
@@ -158,6 +178,14 @@ class _Live:
             self.job.activity({"type": "stream", "text": text})
 
 
+def _ssh_for(ctx: Any, job: Any) -> Any:
+    """The SSH servers this job may use: only for someone allowed to manage them, and only when there are some."""
+    ssh = getattr(ctx, "ssh", None)
+    if ssh is None or getattr(job, "requester", None) not in ssh.settings.admins or not ssh.list():
+        return None
+    return ssh
+
+
 def _describe(item: Any) -> str:
     if item.kind == "trigger":
         where = "（只读的相关话题）" if item.context else ""
@@ -183,9 +211,11 @@ class AgentExecutor:
         path = transcript_path(job.workdir)
         messages: list[dict[str, Any]] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
         delegates = config.delegates()
-        tools = [*TOOLS, *(DELEGATE_TOOLS[name] for name in delegates)]
+        job.ssh = _ssh_for(ctx, job)
+        tools = [*TOOLS, *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else [])]
         if not messages:
             system = SYSTEM + (DELEGATING.format(names="、".join(delegates)) if delegates else "")
+            system += SSH_RULES if job.ssh else ""
             system += f"\n团队的要求：\n{config.instructions}\n" if config.instructions else ""
             messages = [{"role": "system", "content": system}, {"role": "user", "content": job.assignment}]
         job.workdir.mkdir(parents=True, exist_ok=True)
@@ -246,6 +276,8 @@ class AgentExecutor:
             return await self._call(job, config, name, args)
         # A model may reuse a call id across turns; the step is this call's alone.
         key = f"{call_id or 'call'}-{uuid.uuid4().hex[:8]}"
+        if name == "ssh":
+            return await self._ssh(job, key, args), False
         step = {"type": "step", "key": key, "name": name, "input": _step_input(name, args)}
         job.activity({**step, "status": "running", "output": ""})
         result, ends = await self._call(job, config, name, args)
@@ -256,6 +288,36 @@ class AgentExecutor:
             result_shown = _clip(result)
         job.activity({**step, "status": "error" if failed else "done", "output": result_shown})
         return result, ends
+
+    async def _ssh(self, job, key: str, args: dict[str, Any]) -> str:
+        """One command on one of the person's servers: run by the host, after the person's approval if it needs it."""
+        ssh = getattr(job, "ssh", None)
+        if ssh is None:
+            return "错误：你不能使用 SSH 服务器"
+        if "_invalid" in args:
+            return f"错误：参数不是合法的 JSON：{args['_invalid'][:200]}"
+        name, command = str(args.get("host", "")), str(args.get("command", "")).strip()
+        reason = str(args.get("reason", "")).strip()
+        host = ssh.get(name)
+        if host is None:
+            return f"错误：没有叫 {name} 的服务器；用 ssh_hosts 看清单"
+        if not command:
+            return "错误：命令是空的"
+        step = {"type": "step", "key": key, "name": "ssh", "input": f"{name}  $ {command}"}
+        needs = host.get("approval", "ask") == "ask" or (
+            host.get("approval") == "read" and not ssh_rules.is_read_only(command))
+        if needs:
+            job.activity({**step, "status": "approval", "output": reason or "（没有说明理由）"})
+            decision = await ssh.approvals.wait(job.ticket_id, key, APPROVAL_TIMEOUT)
+            if decision != "approved":
+                words = "人拒绝了这条命令" if decision == "refused" else "等了 30 分钟没有人批准"
+                job.activity({**step, "status": "error", "output": words})
+                return f"没有执行：{words}。不要换个写法再试；需要的话向人说明为什么要执行。"
+        job.activity({**step, "status": "running", "output": ""})
+        code, output = await ssh.run(name, command, timeout=SSH_COMMAND_TIMEOUT)
+        result = f"[exit code {code}]\n{output}" if code is not None else f"[超过 {SSH_COMMAND_TIMEOUT} 秒，已停止]\n{output}"
+        job.activity({**step, "status": "done" if code == 0 else "error", "output": _clip(result)})
+        return result if len(result) <= 12000 else result[:12000] + "\n...[后面截断]"
 
     async def _call(self, job, config: AgentConfig, name: str, args: dict[str, Any]) -> tuple[str, bool]:
         """Run one tool; returns what the model reads back, and whether the turn ends."""
@@ -285,6 +347,19 @@ class AgentExecutor:
                 answer = await cli_agents.delegate(name, delegate_config, job, str(args.get("task", "")),
                                                    bool(args.get("fresh")))
                 return answer if len(answer) <= 20000 else answer[:20000] + "\n...[后面截断]", False
+            if name == "ssh_hosts":
+                ssh = getattr(job, "ssh", None)
+                if ssh is None:
+                    return "错误：你不能使用 SSH 服务器", False
+                rows = []
+                for h in ssh.list():
+                    state = h.get("state") or {}
+                    tested = {True: "上次测试连通", False: f"上次测试连不上（{state.get('message', '')[:40]}）"}.get(
+                        state.get("ok"), "还没测试")
+                    via = f"，经过 {h['jump']}" if h.get("jump") else ""
+                    rows.append(f"- {h['name']}：{h['user']}@{h['address']}:{h['port']}{via}；"
+                                f"执行权限：{ssh_rules.APPROVALS.get(h.get('approval', 'ask'))}；{tested}")
+                return "\n".join(rows) or "（没有登记的服务器）", False
             if name == "ack":
                 job.ack(str(args["trigger_id"]), str(args["text"]))
                 return "已确认", False

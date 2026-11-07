@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import re
+import shlex
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -99,6 +100,7 @@ class SshHosts:
         self.store = store
         self.home = home
         self.settings = settings
+        self.approvals = Approvals()
         self.store.db.executescript(SCHEMA)
 
     # --- the key ---
@@ -265,3 +267,84 @@ def _explain(output: str, code: int | None) -> str | None:
     if "connection refused" in text:
         return "端口没开 SSH（连接被拒）"
     return None
+
+
+# --- what a worker may run without asking, on a host set to "read" ---------------------------------------------------
+
+# Programs that only look. Some only with certain subcommands; `find` without its acting options.
+LOOKING = {"ls", "cat", "head", "tail", "grep", "egrep", "fgrep", "zgrep", "zcat", "stat", "wc", "du", "df", "free",
+           "uptime", "hostname", "whoami", "id", "ps", "pgrep", "uname", "date", "lsblk", "lscpu", "lsmem", "lsof",
+           "ss", "netstat", "nvidia-smi", "journalctl", "which", "echo", "sort", "uniq", "cut", "tr", "file", "tree",
+           "realpath", "readlink", "basename", "dirname", "nproc", "getent", "last", "w", "who", "pwd",
+           "md5sum", "sha256sum", "find", "systemctl", "docker", "git", "ip", "top", "dmesg", "crontab", "true"}
+SUBCOMMANDS = {
+    "systemctl": {"status", "is-active", "is-enabled", "is-failed", "list-units", "list-timers", "show", "cat",
+                  "list-unit-files"},
+    "docker": {"ps", "logs", "images", "inspect", "version", "info", "stats", "top", "port"},
+    "git": {"status", "log", "diff", "show", "branch", "remote", "rev-parse", "describe", "tag"},
+    "ip": {"addr", "a", "address", "route", "r", "link", "l", "neigh"},
+    "crontab": {"-l"},
+}
+FIND_ACTS = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls"}
+_HARMLESS_REDIRECTS = re.compile(r"\s(?:[12]?>\s*/dev/null|2>&1|[12]?>&[12])")
+_SEGMENTS = re.compile(r"\|\||&&|[|;\n]")
+
+
+def is_read_only(command: str) -> bool:
+    """Whether a command only looks: every part of it a known looking program, nothing written, nothing substituted.
+    Anything it cannot tell is treated as a change."""
+    text = _HARMLESS_REDIRECTS.sub(" ", " " + command)
+    if re.search(r"`|\$\(|<\(|>\(|>|<<|\bsudo\b|\bsu\b", text):
+        return False
+    for segment in _SEGMENTS.split(text):
+        if not segment.strip():
+            continue
+        try:
+            words = shlex.split(segment)
+        except ValueError:
+            return False
+        if not words or "=" in words[0]:
+            return False
+        program = words[0].rsplit("/", 1)[-1]
+        if program not in LOOKING:
+            return False
+        if program in SUBCOMMANDS:
+            rest = [w for w in words[1:] if not w.startswith("-") or program == "crontab"]
+            if not rest or rest[0] not in SUBCOMMANDS[program]:
+                return False
+            if program == "docker" and rest[0] == "stats" and "--no-stream" not in words:
+                return False
+        if program == "find" and FIND_ACTS & set(words):
+            return False
+        if program == "top" and "-b" not in words:
+            return False
+        if program == "dmesg" and ({"-c", "-C", "--clear", "--read-clear"} & set(words)):
+            return False
+    return True
+
+
+# --- a person's approval of one command ------------------------------------------------------------------------------
+
+
+class Approvals:
+    """Commands waiting for a person: the worker's turn waits on each until it is approved, refused or times out."""
+
+    def __init__(self) -> None:
+        self.pending: dict[tuple[str, str], asyncio.Future] = {}
+
+    async def wait(self, ticket_id: str, key: str, timeout: float) -> str:
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
+        self.pending[(ticket_id, key)] = future
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except TimeoutError:
+            return "timeout"
+        finally:
+            self.pending.pop((ticket_id, key), None)
+
+    def decide(self, ticket_id: str, key: str, approve: bool) -> bool:
+        future = self.pending.get((ticket_id, key))
+        if future is None or future.done():
+            return False
+        future.set_result("approved" if approve else "refused")
+        return True

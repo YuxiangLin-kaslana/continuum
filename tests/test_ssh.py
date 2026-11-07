@@ -104,3 +104,114 @@ def test_admins_add_test_and_remove_servers_and_others_cannot(tmp_path):
             await rt.close()
 
     asyncio.run(main())
+
+
+def test_a_worker_runs_commands_on_a_server_and_waits_for_a_person_to_approve_changes(tmp_path):
+    from test_agent import ScriptedModel, StreamingModel, call
+
+    from continuum.runtime.ssh import Host
+
+    log = tmp_path / "ssh.log"
+    fake = tmp_path / "fake-ssh"
+    fake.write_text(f"#!{sys.executable}\nimport sys\nopen({str(log)!r}, 'a').write(sys.argv[-1] + '\\n')\n"
+                    "print('ran: ' + sys.argv[-1])\n")
+    fake.chmod(0o755)
+    tools_seen = []
+
+    class Worker(StreamingModel):
+        async def stream(self, messages, tools=None, on_progress=None, **extra):
+            tools_seen.append([t["function"]["name"] for t in tools or []])
+            return await super().stream(messages, tools, on_progress, **extra)
+
+    router = ScriptedModel(call("decide", decision="accept", title="看看 web", scope="检查并重启 web",
+                                acknowledgement="好。", name="web", reason="请求"))
+    worker = Worker(
+        call("ssh_hosts"),
+        call("ssh", host="web", command="systemctl status nginx", reason="看状态"),
+        call("ssh", host="web", command="systemctl restart nginx", reason="它挂了，重启一下"),
+        call("ssh", host="web", command="rm -rf /var/log/nginx", reason="清日志"),
+        lambda messages: call("report", state="ready", summary="重启好了；删日志被你拒绝了。"))
+
+    async def main():
+        from test_agent import agent_runtime
+
+        rt = agent_runtime(tmp_path / "home", router, worker, sources={"app": {"kind": "app"}},
+                           policy={"sources": {"app": {"allowed": [{"id": "me"}]}}},
+                           api={"enabled": True, "port": 0})
+        rt.settings.ssh.admins = ["me"]
+        rt.settings.ssh.ssh_command = str(fake)
+        rt.ssh.put(Host(name="web", address="34.1.2.3", user="Yuxia", approval="read"))
+        me = {"Authorization": f"Bearer {rt.accounts.add('me')}"}
+        ctx = rt.sources["app"]
+        port, runner = await serve(rt)
+
+        def waiting():
+            return [s for s in ctx.kind.steps(ctx, "me", "main") if s["status"] == "approval"]
+
+        try:
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as c:
+                await c.post("/api/v1/threads/main/messages", headers=me, json={"text": "看看 web，挂了就重启"})
+                await _until(lambda: bool(waiting()))
+                [first] = waiting()
+                assert first["input"] == "web  $ systemctl restart nginx" and first["output"] == "它挂了，重启一下"
+                # Only the ticket's own people decide, and only once.
+                url = f"/api/v1/approvals/{first['ticket_id']}/{first['key']}"
+                assert (await c.post(url, headers=me, json={"approve": True})).json() == {"decided": "approved"}
+                assert (await c.post(url, headers=me, json={"approve": True})).status_code == 404
+                await _until(lambda: len(waiting()) == 1 and waiting()[0]["key"] != first["key"])
+                [second] = waiting()
+                url = f"/api/v1/approvals/{second['ticket_id']}/{second['key']}"
+                assert (await c.post(url, headers=me, json={"approve": False})).json() == {"decided": "refused"}
+                await _until(lambda: any(m["role"] == "reply" for m in ctx.kind.history(ctx, "me", "main")))
+                return ctx.kind.steps(ctx, "me", "main"), worker.seen
+        finally:
+            runner.cancel()
+            await rt.close()
+
+    steps, seen = asyncio.run(main())
+    # The read-only command ran unasked, the approved one ran, the refused one never did.
+    assert log.read_text().splitlines() == ["systemctl status nginx", "systemctl restart nginx"]
+    assert [(s["input"].split("$ ")[1], s["status"]) for s in steps if s["name"] == "ssh"] == [
+        ("systemctl status nginx", "done"), ("systemctl restart nginx", "done"), ("rm -rf /var/log/nginx", "error")]
+    assert "web：Yuxia@34.1.2.3:22" in seen[1][-1]["content"] and "只读命令直接执行" in seen[1][-1]["content"]
+    assert "人拒绝了这条命令" in seen[4][-1]["content"]
+    assert {"ssh", "ssh_hosts"} <= set(tools_seen[0])
+
+
+def test_the_ssh_tools_are_offered_only_for_someone_who_may_manage_the_servers(tmp_path):
+    from test_agent import ScriptedModel, StreamingModel, agent_runtime, call, post
+
+    from continuum.runtime.ssh import Host
+
+    tools_seen = []
+
+    class Worker(StreamingModel):
+        async def stream(self, messages, tools=None, on_progress=None, **extra):
+            tools_seen.append({t["function"]["name"] for t in tools or []})
+            return await super().stream(messages, tools, on_progress, **extra)
+
+    router = ScriptedModel(call("decide", decision="accept", title="x", scope="x", reason="r"))
+    worker = Worker(call("report", state="ready", summary="好了"))
+
+    async def main():
+        from test_runtime import drive, replies
+
+        rt = agent_runtime(tmp_path, router, worker)
+        rt.settings.ssh.admins = ["someone-else"]
+        rt.ssh.put(Host(name="web", address="34.1.2.3", user="Yuxia"))
+        try:
+            post(tmp_path, "看看服务器")
+            await drive(rt, lambda: len(replies(tmp_path)) == 2, timeout=10)
+        finally:
+            await rt.close()
+
+    asyncio.run(main())
+    assert tools_seen and not ({"ssh", "ssh_hosts"} & tools_seen[0])
+
+
+async def _until(predicate, timeout=10.0):
+    loop = asyncio.get_running_loop()
+    end = loop.time() + timeout
+    while not predicate():
+        assert loop.time() < end, "timed out"
+        await asyncio.sleep(0.02)

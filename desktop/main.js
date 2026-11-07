@@ -47,6 +47,9 @@ function notify(event) {
   } else if (event.type === 'ticket' && event.ticket.question) {
     title = '需要你拍板';
     body = event.ticket.question;
+  } else if (event.type === 'step' && event.step.status === 'approval') {
+    title = '需要你批准一条命令';
+    body = event.step.input;
   }
   if (!title) return;
   const n = new Notification({ title, body: body.slice(0, 200) });
@@ -178,6 +181,8 @@ handle('api:post', (thread, text) =>
 handle('api:steps', (thread) =>
   client.request('GET', `/api/v1/threads/${encodeURIComponent(thread)}/steps`));
 handle('api:tickets', () => client.request('GET', '/api/v1/tickets'));
+handle('api:approve', (ticketId, key, approve) => client.request(
+  'POST', `/api/v1/approvals/${encodeURIComponent(ticketId)}/${encodeURIComponent(key)}`, { approve }));
 handle('api:ssh', () => client.request('GET', '/api/v1/ssh'));
 handle('api:sshSave', (name, host) =>
   client.request('PUT', `/api/v1/ssh/hosts/${encodeURIComponent(name)}`, host));

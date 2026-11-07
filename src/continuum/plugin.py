@@ -107,6 +107,8 @@ class ExecutorContext:
     config: Any
     scripts: Mapping[str, Script]
     models: Mapping[str, ChatModel] = field(default_factory=dict)
+    # The SSH servers a worker may reach through the host, with their approvals (runtime.ssh.SshHosts).
+    ssh: Any = None
 
 
 class ExecutorKind(Protocol):

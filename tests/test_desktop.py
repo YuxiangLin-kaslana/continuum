@@ -298,3 +298,42 @@ def test_nothing_in_a_conversation_scrolls_sideways_and_markdown_renders(width):
             page.screenshot(path=f"{SHOTS}/desktop-wide-{width}.png")
         assert errors == []
         browser.close()
+
+
+@pytest.mark.skipif(_browser() is None, reason="needs playwright")
+def test_a_command_on_a_server_waits_in_the_conversation_for_the_persons_approval():
+    sync_playwright = _browser()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        page = browser.new_context(viewport={"width": 520, "height": 780}, bypass_csp=True).new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.add_init_script(path=str(DESKTOP / "test" / "fake-bridge.js"))
+        page.goto((DESKTOP / "renderer" / "index.html").as_uri())
+        page.wait_for_selector("#app[data-ready]")
+        page.fill("#username", "me")
+        page.fill("#password", "good-password")
+        page.click("#connect")
+        page.wait_for_selector("#main:not([hidden])")
+
+        page.fill("#input", "web 上的 nginx 挂了，帮我重启")
+        page.press("#input", "Enter")
+        card = page.locator(".approval-box")
+        card.wait_for()
+        assert "等你批准一条远程命令" in page.inner_text(".work.running summary")
+        assert "服务器 web" in card.inner_text() and "systemctl restart nginx" in card.inner_text()
+        assert "理由：nginx 没在跑" in card.inner_text()
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-approval.png")
+        card.get_by_role("button", name="批准执行").click()
+        page.wait_for_selector(".step.ssh.done")
+        page.wait_for_selector(".msg.reply >> text=已重启 nginx。")
+        assert page.locator(".approval-box").count() == 0 and page.locator(".work.running").count() == 0
+
+        page.fill("#input", "再重启一次")
+        page.press("#input", "Enter")
+        page.locator(".approval-box").get_by_role("button", name="拒绝").click()
+        page.wait_for_selector(".msg.reply >> text=你拒绝了，没有重启。")
+        assert "人拒绝了这条命令" in page.locator(".step.ssh.error").last.text_content()
+        assert errors == []
+        browser.close()

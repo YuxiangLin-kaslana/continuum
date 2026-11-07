@@ -353,3 +353,13 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 .bubble em { font-style: italic; color: #e6edf0; }
 .bubble ol { padding-left: 22px; }
 .step details[open]:has(> .step-command) > summary .step-input { display: none; }
+
+/* --- a remote command waiting for the person --- */
+.approval-box { --edge: var(--amber-line); border: 1px solid var(--amber-line); background: rgba(242, 163, 58, 0.06); padding: 10px 12px; display: grid; gap: 6px; margin: 2px 0 4px; }
+.approval-head { display: flex; align-items: center; gap: 7px; color: var(--amber); font-weight: 600; }
+.approval-head .i { width: 15px; height: 15px; }
+.approval-host { color: var(--soft); font-size: 12.5px; }
+.approval-reason { margin: 0; color: var(--soft); font-size: 12.5px; overflow-wrap: anywhere; }
+.approval-box .step-command { margin: 0; }
+.approval-box .actions { display: flex; gap: 8px; justify-content: flex-end; }
+.work.running .approval-box ~ * { opacity: 1; }

@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('continuum', {
   post: call('api:post'),
   steps: call('api:steps'),
   tickets: call('api:tickets'),
+  approve: call('api:approve'),
   ssh: call('api:ssh'),
   sshSave: call('api:sshSave'),
   sshDelete: call('api:sshDelete'),

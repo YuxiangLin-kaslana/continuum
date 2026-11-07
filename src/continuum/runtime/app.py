@@ -98,7 +98,7 @@ class Runtime:
                 self._config(executor_kind, self.settings.executor.config, "executor"), self.registry.scripts,
                 self.settings.executor.max_workers, self.router.relay, paused=lambda: self.policy.paused,
                 on_report=self.notify_ticket, models=self.models,
-                on_activity=self.notify_activity)
+                on_activity=self.notify_activity, ssh=self.ssh)
             self.outbox = StoreOutbox(self.store, self.effects, self._send)
             self.engine = Engine(EngineOptions(
                 repo=self.store, policy=lambda: self.policy, scope=self, assessor=self.router,
