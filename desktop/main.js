@@ -181,6 +181,7 @@ handle('api:post', (thread, text) =>
 handle('api:steps', (thread) =>
   client.request('GET', `/api/v1/threads/${encodeURIComponent(thread)}/steps`));
 handle('api:tickets', () => client.request('GET', '/api/v1/tickets'));
+handle('api:workers', () => client.request('GET', '/api/v1/workers'));
 handle('api:approve', (ticketId, key, approve) => client.request(
   'POST', `/api/v1/approvals/${encodeURIComponent(ticketId)}/${encodeURIComponent(key)}`, { approve }));
 handle('api:ssh', () => client.request('GET', '/api/v1/ssh'));

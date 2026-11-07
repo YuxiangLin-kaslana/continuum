@@ -121,6 +121,22 @@ class AppSource:
             (user, thread, limit)).fetchall()
         return [dict(zip(STEP_COLUMNS, row, strict=True)) for row in reversed(rows)]
 
+    def step_counts(self, ctx: Any, user: str) -> dict[str, dict[str, int]]:
+        """How many steps of each kind each of the user's tickets took: {ticket_id: {name: count}}."""
+        rows = self._db(ctx).execute(
+            "SELECT ticket_id, name, COUNT(*) FROM steps WHERE user = ? AND name NOT IN ('note', 'think') "
+            "GROUP BY ticket_id, name", (user,)).fetchall()
+        counts: dict[str, dict[str, int]] = {}
+        for ticket_id, name, n in rows:
+            counts.setdefault(ticket_id, {})[name] = n
+        return counts
+
+    def latest_step(self, ctx: Any, user: str, ticket_id: str) -> dict[str, Any] | None:
+        row = self._db(ctx).execute(
+            f"SELECT {', '.join(STEP_COLUMNS)} FROM steps WHERE user = ? AND ticket_id = ? "
+            "AND name NOT IN ('note', 'think') ORDER BY id DESC LIMIT 1", (user, ticket_id)).fetchone()
+        return dict(zip(STEP_COLUMNS, row, strict=True)) if row else None
+
     def activity(self, ctx: Any, user: str, thread: str, ticket_id: str, event: dict[str, Any]) -> None:
         """What a worker is doing for this conversation: a step is kept (a running one is updated when it ends);
         the answer as it is written, and the model thinking, are only passed to the open streams."""

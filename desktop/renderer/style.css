@@ -363,3 +363,35 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 .approval-box .step-command { margin: 0; }
 .approval-box .actions { display: flex; gap: 8px; justify-content: flex-end; }
 .work.running .approval-box ~ * { opacity: 1; }
+
+/* --- workers --- */
+.badge.teal { background: var(--teal); color: #031416; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; margin: 14px 0 0; }
+.stats.tools { margin-top: 8px; }
+.stat { border: 1px solid var(--line); background: var(--panel); padding: 10px 12px; display: grid; gap: 2px; min-width: 0; }
+.stat b { font-size: 22px; font-weight: 700; color: #e6edf0; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.stat span { font-size: 11.5px; color: var(--dim); overflow-wrap: anywhere; }
+.stat.live { border-color: var(--teal-line); }
+.stat.live b { color: var(--teal); }
+.stat.small b { font-size: 17px; }
+.card.worker.busy { --edge: var(--teal-line); }
+.card.worker.busy .stage { color: var(--teal); }
+.card.worker.idle .stage { color: var(--dim); }
+.card.worker.ended { --edge: var(--line-2); }
+.workers .hint { margin: 0 0 10px; color: var(--dim); font-size: 12.5px; }
+
+/* --- three tabs and the person's corner share the bar: it gives way as the window narrows --- */
+.bar { grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 6px; }
+.tabs { justify-self: center; min-width: 0; }
+@media (max-width: 760px) {
+  .tabs button { padding-left: 12px; padding-right: 12px; gap: 6px; }
+  .who .user { display: none; }
+}
+@media (max-width: 560px) {
+  .stripes { width: 22px; }
+  .tabs button { padding-left: 8px; padding-right: 8px; }
+  .tab-sep { display: none; }
+  .who { gap: 4px; }
+  .who .avatar.sm { display: none; }
+}
+.stats.tools { grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); }

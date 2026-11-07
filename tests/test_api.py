@@ -197,3 +197,44 @@ def test_a_revoked_token_no_longer_works(tmp_path):
             await rt.close()
 
     asyncio.run(main())
+
+
+def test_the_workers_page_shows_what_runs_now_and_what_ran(tmp_path):
+    async def hold(job):
+        job.activity({"type": "step", "key": "s1", "name": "shell", "input": "ls", "status": "done", "output": ""})
+        job.activity({"type": "step", "key": "s2", "name": "claude_code", "input": "写", "status": "running",
+                      "output": ""})
+        await asyncio.sleep(3600)
+
+    async def main():
+        rt = app_runtime(tmp_path, "hold", [Plugin(name="hold", scripts={"hold": hold})], allowed=("ann", "bob"))
+        ann = {"Authorization": f"Bearer {rt.accounts.add('ann')}"}
+        bob = {"Authorization": f"Bearer {rt.accounts.add('bob')}"}
+        port, runner = await serve(rt)
+        try:
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client:
+                await client.post("/api/v1/threads/main/messages", headers=ann, json={"text": "a long job"})
+                await until(lambda: bool(rt.executor.sessions))
+                await until(lambda: rt.sources["app"].kind.latest_step(rt.sources["app"], "ann",
+                                                                        next(iter(rt.executor.sessions))) is not None)
+                page = (await client.get("/api/v1/workers", headers=ann)).json()
+                assert page["max_workers"] == rt.settings.executor.max_workers and page["busy_now"] == 1
+                [running] = page["running"]
+                assert running["busy"] and running["title"] == "a long job" and running["number"] == 1
+                assert running["current"]["name"] == "claude_code" and running["steps"] == {"shell": 1, "claude_code": 1}
+                assert page["totals"]["assignments"] == 1 and page["tools"] == {"shell": 1, "claude_code": 1}
+                # Someone else's workers are not shown.
+                other = (await client.get("/api/v1/workers", headers=bob)).json()
+                assert other["running"] == [] and other["totals"]["assignments"] == 0 and other["tools"] == {}
+
+                await client.post(f"/api/v1/tickets/{running['ticket_id']}/stop", headers=ann, json={})
+                await until(lambda: rt.executor.sessions == {})
+                page = (await client.get("/api/v1/workers", headers=ann)).json()
+                assert page["running"] == [] and page["busy_now"] == 0
+                [done] = page["recent"]
+                assert done["state"] == "ended" and done["outcome"] == "stopped" and done["ended_at"]
+        finally:
+            runner.cancel()
+            await rt.close()
+
+    asyncio.run(main())

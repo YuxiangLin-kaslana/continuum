@@ -268,6 +268,7 @@
     $('input').focus();
     // Every login asks whether a newer version is out.
     checkUpdate(false);
+    if (api.workers) loadWorkers();
   }
 
   function setView(view) {
@@ -278,6 +279,8 @@
     $('view-chat').hidden = view !== 'chat';
     $('view-tickets').hidden = view !== 'tickets';
     $('view-settings').hidden = view !== 'settings';
+    $('view-workers').hidden = view !== 'workers';
+    if (view === 'workers') loadWorkers();
     $('settings').setAttribute('aria-pressed', String(view === 'settings'));
     if (view === 'chat') $('input').focus();
     if (view === 'settings') loadSsh();
@@ -710,6 +713,110 @@
     $('badge').textContent = String(waiting);
   }
 
+  // --- workers: how many run now, on what, and what the past ones used ---
+
+  const TOOL_NAMES = {
+    claude_code: 'Claude Code', codex: 'Codex', ssh: '远程命令', shell: '本地命令', files: '文件操作',
+  };
+  const FILE_STEPS = new Set(['read_file', 'write_file', 'list_files']);
+
+  function duration(from, to) {
+    const ms = (to ? new Date(to) : new Date()) - new Date(from);
+    if (!(ms >= 0)) return '';
+    const s = Math.round(ms / 1000);
+    if (s < 60) return `${s} 秒`;
+    if (s < 3600) return `${Math.floor(s / 60)} 分 ${s % 60} 秒`;
+    return `${Math.floor(s / 3600)} 小时 ${Math.floor((s % 3600) / 60)} 分`;
+  }
+
+  function toolsUsed(steps) {
+    const merged = {};
+    for (const [name, n] of Object.entries(steps || {})) {
+      const key = FILE_STEPS.has(name) ? 'files' : name;
+      merged[key] = (merged[key] || 0) + n;
+    }
+    return merged;
+  }
+
+  function tile(value, label, cls = '') {
+    const box = el('div', `stat ${cls}`);
+    box.append(el('b', '', String(value)), el('span', '', label));
+    return box;
+  }
+
+  function workerCard(w, live) {
+    const kind = live ? (w.busy ? 'busy' : 'idle') : 'ended';
+    const box = el('article', `card notched worker ${kind}`);
+    const top = el('div', 'card-top');
+    top.append(el('span', 'ticket-id', `#${w.ticket_id.slice(-4).toUpperCase()} · 第 ${w.number} 次`),
+      el('span', 'stage', live ? (w.busy ? '干活中' : '等待中') : (OUTCOMES[w.outcome] || '已结束')));
+    box.append(top, el('div', 'card-title', w.title));
+    const detail = el('dl', 'detail');
+    const row = (label, value) => { if (value) detail.append(el('dt', '', label), el('dd', '', value)); };
+    if (w.current) row('当前步骤', `${STEP_NAMES[w.current.name] || w.current.name}  ${w.current.input}`);
+    if (live && !w.busy) row('状态', '这一轮做完了，等下一条消息或回答');
+    if (w.started_at) row(live ? '已运行' : '用时', duration(w.started_at, live ? null : w.ended_at));
+    const used = Object.entries(toolsUsed(w.steps)).map(([k, n]) => `${TOOL_NAMES[k] || k} ${n}`).join(' · ');
+    row('用到', used);
+    box.append(detail);
+    const foot = el('div', 'card-foot');
+    const when = el('span', 'meta-item');
+    when.append(icon('calendar'), el('span', '', `${day(w.started_at || w.created_at)} ${time(w.started_at || w.created_at)}`));
+    foot.append(when);
+    if (w.thread) {
+      const actions = el('div', 'actions');
+      const open = el('button', 'outline', '查看对话');
+      open.addEventListener('click', async () => {
+        setView('chat');
+        await openThread(w.thread);
+      });
+      actions.append(open);
+      foot.append(actions);
+    }
+    box.append(foot);
+    return box;
+  }
+
+  let workersTimer = null;
+  async function loadWorkers() {
+    clearTimeout(workersTimer);
+    let page;
+    try {
+      page = await call('workers');
+    } catch (error) {
+      showStatus(error.message);
+      return;
+    }
+    $('busy').hidden = !page.busy_now;
+    $('busy').textContent = String(page.busy_now);
+    if (state.view !== 'workers') return;
+    $('worker-stats').replaceChildren(
+      tile(`${page.busy_now}/${page.max_workers}`, '正在干活 / 上限', page.busy_now ? 'live' : ''),
+      tile(page.totals.waiting, '等待中'),
+      tile(page.totals.assignments, '累计调用 Worker'),
+      tile(page.totals.tickets, '工单'));
+    const tools = toolsUsed(page.tools);
+    $('worker-tools').replaceChildren(...Object.keys(TOOL_NAMES).map((k) => tile(tools[k] || 0, TOOL_NAMES[k], 'small')));
+    const box = $('workers');
+    box.replaceChildren();
+    const group = (name, label, kind, items, live) => {
+      const row = el('div', `group-row ${kind}`);
+      row.append(el('h3', 'group', `${name} ${pad(items.length)}`), en(label));
+      box.append(row, ...(items.length ? items.map((w) => workerCard(w, live)) : [el('p', 'hint', '没有。')]));
+    };
+    group('运行中', 'RUNNING', 'working', page.running, true);
+    group('最近', 'RECENT', 'ended', page.recent, false);
+    // While the page is open it keeps itself current.
+    workersTimer = setTimeout(() => { if (state.view === 'workers') loadWorkers(); }, 4000);
+  }
+
+  // The badge on the tab follows ticket changes, at most a few times a second.
+  let workersSoon = null;
+  function workersChanged() {
+    if (workersSoon) return;
+    workersSoon = setTimeout(() => { workersSoon = null; loadWorkers(); }, 600);
+  }
+
   // --- settings: the SSH servers Continuum may reach ---
 
   const ssh = { hosts: [], approvals: {}, editing: null, key: '', line: '' };
@@ -933,12 +1040,14 @@
     else if (event.type === 'ticket') {
       state.tickets.set(event.ticket.id, event.ticket);
       renderTickets();
+      workersChanged();
       if (event.ticket.stage !== 'working' && state.thinking.delete(event.ticket.id)) renderMessages();
     } else if (event.type === 'step') {
       const step = event.step;
       if (!state.steps.has(step.thread)) state.steps.set(step.thread, new Map());
       state.steps.get(step.thread).set(`${step.ticket_id}:${step.key}`, step);
       if (step.thread === state.thread) renderMessages();
+      if (state.view === 'workers') workersChanged();
     } else if (event.type === 'thinking') {
       state.thinking.set(event.ticket_id, event.thread);
       if (event.thread === state.thread) renderMessages();

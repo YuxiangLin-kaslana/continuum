@@ -140,6 +140,27 @@
       setTimeout(() => resolve(approve), 20);
       return ok({ decided: approve ? 'approved' : 'refused' });
     },
+    workers: () => {
+      const at = (min) => new Date(Date.now() - min * 60000).toISOString();
+      return ok({
+        executor: 'agent', max_workers: 3, busy_now: 1,
+        totals: { assignments: 7, tickets: 5, running: 2, waiting: 1, pending: 0 },
+        tools: { shell: 12, read_file: 3, write_file: 2, claude_code: 2, codex: 1, ssh: 4 },
+        running: [
+          { ticket_id: 't-2', title: '整理本周交期变化', thread: 'main', assignment_id: 'a2', number: 1, state: 'running',
+            busy: true, started_at: at(3), created_at: at(3), steps: { shell: 2, claude_code: 1 },
+            current: { name: 'claude_code', input: '把交期表整理成 markdown 表格', status: 'running' } },
+          { ticket_id: 't-1', title: '核对 Laser Control Board 的供应商报价', thread: 'main', assignment_id: 'a1',
+            number: 2, state: 'running', busy: false, started_at: at(40), created_at: at(40), steps: { shell: 1 },
+            current: null },
+        ],
+        recent: [
+          { ticket_id: 't-3', title: '更新 BOM v3 的替代料', thread: 'main', assignment_id: 'a3', number: 1, state: 'ended',
+            outcome: 'completed', started_at: at(90), ended_at: at(84), created_at: at(90),
+            steps: { shell: 5, write_file: 2, ssh: 4 } },
+        ],
+      });
+    },
     tickets: () => ok(tickets),
     // SSH servers, as an admin sees them; a host whose address starts with 10. times out, as from another cloud.
     ssh: () => ok({ admin: true, public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAvfSbnyut continuum@ai-api.yuxianglin.xyz',

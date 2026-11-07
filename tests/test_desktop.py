@@ -337,3 +337,41 @@ def test_a_command_on_a_server_waits_in_the_conversation_for_the_persons_approva
         assert "人拒绝了这条命令" in page.locator(".step.ssh.error").last.text_content()
         assert errors == []
         browser.close()
+
+
+@pytest.mark.skipif(_browser() is None, reason="needs playwright")
+def test_the_workers_page_counts_what_runs_and_what_ran():
+    sync_playwright = _browser()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        page = browser.new_context(viewport={"width": 520, "height": 780}, bypass_csp=True).new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.add_init_script(path=str(DESKTOP / "test" / "fake-bridge.js"))
+        page.goto((DESKTOP / "renderer" / "index.html").as_uri())
+        page.wait_for_selector("#app[data-ready]")
+        page.fill("#username", "me")
+        page.fill("#password", "good-password")
+        page.click("#connect")
+        page.wait_for_selector("#main:not([hidden])")
+        page.wait_for_selector("#busy:not([hidden])")
+        assert page.inner_text("#busy") == "1"
+
+        page.click("#tab-workers")
+        page.wait_for_selector(".card.worker.busy")
+        stats = page.locator("#worker-stats .stat").all_inner_texts()
+        assert stats[0].split() == ["1/3", "正在干活", "/", "上限"] and "累计调用 Worker" in stats[2]
+        tools = dict(t.split("\n")[::-1] for t in page.locator("#worker-tools .stat").all_inner_texts())
+        assert tools == {"Claude Code": "2", "Codex": "1", "远程命令": "4", "本地命令": "12", "文件操作": "5"}
+        busy = page.inner_text(".card.worker.busy")
+        assert "干活中" in busy and "交给 Claude Code" in busy and "已运行" in busy and "3 分" in busy
+        assert "等待中" in page.inner_text(".card.worker.idle")
+        ended = page.inner_text(".card.worker.ended")
+        assert "已完成" in ended and "用时" in ended and "6 分 0 秒" in ended and "远程命令 4" in ended
+        assert page.locator("#workers .group").all_inner_texts() == ["运行中 02", "最近 01"]
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-workers.png")
+        page.locator(".card.worker.busy").get_by_role("button", name="查看对话").click()
+        assert page.is_visible("#view-chat")
+        assert errors == []
+        browser.close()

@@ -200,6 +200,47 @@ def create_app(rt: Runtime) -> FastAPI:
         except UserError as error:
             raise refused(error) from None
 
+    # --- workers: how many run, on what, and what they have used ---
+
+    @app.get("/api/v1/workers")
+    async def workers(user: str = Depends(user_of)) -> dict[str, Any]:
+        kind, ctx = source()
+        counts = kind.step_counts(ctx, user)
+        tickets = [t for t in rt.store.tickets.list() if owns(user, t)]
+        rows = []
+        for ticket in tickets:
+            thread = ticket_view(ticket)["thread"]
+            for number, a in enumerate(ticket.assignments, 1):
+                rows.append({"ticket_id": ticket.id, "title": ticket.title, "thread": thread, "assignment_id": a.id,
+                             "number": number, "state": a.state,
+                             "outcome": ticket.ended.outcome if ticket.ended and a is ticket.assignments[-1] else None,
+                             "report": a.report.state if a.report else None,
+                             "created_at": a.created_at.isoformat(),
+                             "started_at": a.started_at.isoformat() if a.started_at else None,
+                             "ended_at": a.ended_at.isoformat() if a.ended_at else None})
+        rows.sort(key=lambda r: r["started_at"] or r["created_at"], reverse=True)
+        running = []
+        for row in rows:
+            if row["state"] != "running":
+                continue
+            session = rt.executor.sessions.get(row["ticket_id"])
+            busy = bool(session and session.assignment_id == row["assignment_id"] and session.busy)
+            running.append({**row, "busy": busy, "steps": counts.get(row["ticket_id"], {}),
+                            "current": kind.latest_step(ctx, user, row["ticket_id"]) if busy else None})
+        tools: dict[str, int] = {}
+        for per_ticket in counts.values():
+            for name, n in per_ticket.items():
+                tools[name] = tools.get(name, 0) + n
+        ended = [{**r, "steps": counts.get(r["ticket_id"], {})} for r in rows if r["state"] == "ended"][:20]
+        return {
+            "executor": rt.settings.executor.kind, "max_workers": rt.settings.executor.max_workers,
+            "busy_now": sum(1 for r in running if r["busy"]),
+            "totals": {"assignments": len(rows), "tickets": len(tickets), "running": len(running),
+                       "waiting": sum(1 for r in running if not r["busy"]), "pending": sum(
+                           1 for r in rows if r["state"] == "pending")},
+            "tools": tools, "running": running, "recent": ended,
+        }
+
     # --- SSH servers: only for the users named in [ssh] admins ---
 
     def ssh_admin(user: str) -> None:

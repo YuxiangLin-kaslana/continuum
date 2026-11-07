@@ -590,6 +590,8 @@ l-33 -150 -4 -901 -3 -902 25 -28 24 -29 291 0 c277 0 291 1 310 20 20 20 20
           <button id="tab-chat" role="tab" aria-selected="true" data-view="chat"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>对话</button>
           <span class="tab-sep" aria-hidden="true"></span>
           <button id="tab-tickets" role="tab" aria-selected="false" data-view="tickets"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="m3 13 9 5 9-5"/></svg>工单<span id="badge" class="badge" hidden></span></button>
+          <span class="tab-sep" aria-hidden="true"></span>
+          <button id="tab-workers" role="tab" aria-selected="false" data-view="workers"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>Worker<span id="busy" class="badge teal" hidden></span></button>
         </nav>
         <div class="who">
           <span id="dot" class="dot" title="连接状态"></span>
@@ -628,6 +630,13 @@ l-33 -150 -4 -901 -3 -902 25 -28 24 -29 291 0 c277 0 291 1 310 20 20 20 20
           <span class="en" aria-hidden="true">NO TICKETS YET</span>
           <p>还没有工单。在对话里交代一件事，接下来就会出现在这里。</p>
         </div>
+      </div>
+
+      <div id="view-workers" class="view tickets workers" hidden>
+        <div class="tickets-head"><h2 class="section-head"><span class="slash" aria-hidden="true">//</span><span class="en" aria-hidden="true">WORKERS</span>Worker</h2></div>
+        <div id="worker-stats" class="stats"></div>
+        <div id="worker-tools" class="stats tools"></div>
+        <div id="workers"></div>
       </div>
 
       <div id="view-settings" class="view tickets settings" hidden>
