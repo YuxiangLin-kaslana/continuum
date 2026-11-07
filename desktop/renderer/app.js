@@ -112,25 +112,51 @@
     $('status').hidden = !text;
   }
 
-  // --- a small, safe Markdown: everything is escaped first; only lists, tables, headings, bold and code are read ---
+  // --- a small, safe Markdown: everything is escaped first, then a known set of marks is read: headings, lists,
+  // tables, fenced code, quotes, rules, bold, italic, inline code and http(s) links (which open in the browser) ---
 
   function escape(text) {
     return text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
   function inline(text) {
-    return escape(text).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>');
+    // Code spans and links are set aside first, so nothing inside them is read as a mark.
+    const kept = [];
+    const keep = (html) => `\u0000${kept.push(html) - 1}\u0000`;
+    let out = text.replace(/`([^`]+)`/g, (_, code) => keep(`<code>${escape(code)}</code>`));
+    out = out.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
+      (_, label, url) => keep(`<a href="${escape(url)}" target="_blank" rel="noopener">${escape(label)}</a>`));
+    out = out.replace(/https?:\/\/[^\s<>()"'`]+[^\s<>()"'`.,;:!?，。；：！？）]/g,
+      (url) => keep(`<a href="${escape(url)}" target="_blank" rel="noopener">${escape(url)}</a>`));
+    out = escape(out)
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, '$1<em>$2</em>');
+    return out.replace(/\u0000(\d+)\u0000/g, (_, n) => kept[Number(n)]);
   }
   const ROW = /^\s*\|.*\|\s*$/;
   const RULE = /^\s*\|[\s:|-]+\|\s*$/;
-  const ITEM = /^\s*([-*•]|\d+[.)])\s+/;
+  const ITEM = /^\s*([-*•+]|\d+[.)])\s+/;
+  const FENCE = /^\s*(```|~~~)/;
+  const HEADING = /^\s*#{1,6}\s+/;
+  const QUOTE = /^\s*>\s?/;
+  const HR = /^\s*([-*_])(\s*\1){2,}\s*$/;
   function markdown(text) {
     const lines = text.replace(/\r/g, '').split('\n');
     const out = [];
     let rich = false;
     let i = 0;
+    const special = (at) => FENCE.test(lines[at]) || HEADING.test(lines[at]) || ITEM.test(lines[at])
+      || QUOTE.test(lines[at]) || HR.test(lines[at]) || (ROW.test(lines[at]) && RULE.test(lines[at + 1] || ''));
     while (i < lines.length) {
       const line = lines[i];
-      if (ROW.test(line) && RULE.test(lines[i + 1] || '')) {
+      if (FENCE.test(line)) {
+        const fence = line.trim().slice(0, 3);
+        const code = [];
+        i++;
+        while (i < lines.length && !lines[i].trim().startsWith(fence)) code.push(lines[i++]);
+        i++;
+        out.push(`<pre><code>${escape(code.join('\n'))}</code></pre>`);
+        rich = true;
+      } else if (ROW.test(line) && RULE.test(lines[i + 1] || '')) {
         const cells = (row) => row.trim().replace(/^\||\|$/g, '').split('|').map((c) => inline(c.trim()));
         const head = cells(line);
         const rows = [];
@@ -139,19 +165,30 @@
         out.push(`<table><thead><tr>${head.map((c) => `<th>${c}</th>`).join('')}</tr></thead><tbody>${
           rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
         rich = true;
+      } else if (HR.test(line)) {
+        out.push('<hr>');
+        i++;
       } else if (ITEM.test(line)) {
         const ordered = /^\s*\d/.test(line);
         const items = [];
         while (i < lines.length && ITEM.test(lines[i])) items.push(`<li>${inline(lines[i++].replace(ITEM, ''))}</li>`);
         out.push(ordered ? `<ol>${items.join('')}</ol>` : `<ul>${items.join('')}</ul>`);
         rich = true;
+      } else if (QUOTE.test(line)) {
+        const quoted = [];
+        while (i < lines.length && QUOTE.test(lines[i])) quoted.push(inline(lines[i++].replace(QUOTE, '')));
+        out.push(`<blockquote>${quoted.join('<br>')}</blockquote>`);
+      } else if (HEADING.test(line)) {
+        out.push(`<h4>${inline(line.replace(HEADING, ''))}</h4>`);
+        rich = true;
+        i++;
+      } else if (line.trim()) {
+        // Lines that follow one another are one paragraph, with their breaks kept.
+        const para = [];
+        while (i < lines.length && lines[i].trim() && !special(i)) para.push(inline(lines[i++]));
+        if (!para.length) para.push(inline(lines[i++]));
+        out.push(`<p>${para.join('<br>')}</p>`);
       } else {
-        if (/^#{1,4}\s+/.test(line)) {
-          out.push(`<h4>${inline(line.replace(/^#{1,4}\s+/, ''))}</h4>`);
-          rich = true;
-        } else if (line.trim()) {
-          out.push(`<p>${inline(line)}</p>`);
-        }
         i++;
       }
     }
@@ -389,6 +426,10 @@
     if (step.status === 'done') mark.append(icon('check'));
     summary.append(mark);
     details.append(summary);
+    // The summary shows a command's first two lines; opened, the step shows all of it.
+    if (step.name !== 'think' && step.input && (step.input.length > 60 || step.input.includes('\n'))) {
+      details.append(el('pre', 'step-command', step.input));
+    }
     if (step.output) details.append(el(step.name === 'think' ? 'div' : 'pre', 'step-output', step.output));
     else if (step.status === 'running') details.append(el('div', 'step-output waiting', '等待输出…'));
     item.append(details);

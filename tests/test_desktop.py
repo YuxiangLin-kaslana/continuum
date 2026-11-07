@@ -85,7 +85,7 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         page.wait_for_selector("#main:not([hidden])")
         assert page.inner_text("#user") == "me"
         assert page.locator(".msg").count() == 2
-        assert page.locator("#threads button").all_inner_texts() == ["主对话", "bom"]
+        assert page.locator("#threads button").all_inner_texts() == ["主对话", "bom", "wide"]
         assert page.inner_text("#thread-title") == "主对话" and page.inner_text("#thread-no") == "#001"
         assert page.inner_text("#badge") == "1"  # one ticket waits for an answer
 
@@ -238,5 +238,63 @@ def test_the_settings_page_adds_tests_and_removes_ssh_servers():
 
         page.click("#settings")
         assert page.is_visible("#view-chat") and not page.is_visible("#view-settings")
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.skipif(_browser() is None, reason="needs playwright")
+@pytest.mark.parametrize("width", [480, 520, 900])
+def test_nothing_in_a_conversation_scrolls_sideways_and_markdown_renders(width):
+    sync_playwright = _browser()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        page = browser.new_context(viewport={"width": width, "height": 780}, bypass_csp=True).new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("dialog", lambda d: errors.append("dialog: " + d.message))
+        page.add_init_script(path=str(DESKTOP / "test" / "fake-bridge.js"))
+        page.goto((DESKTOP / "renderer" / "index.html").as_uri())
+        page.wait_for_selector("#app[data-ready]")
+        page.fill("#username", "me")
+        page.fill("#password", "good-password")
+        page.click("#connect")
+        page.wait_for_selector("#main:not([hidden])")
+        if page.is_visible("#threads button[data-thread=wide]"):
+            page.click("#threads button[data-thread=wide]")
+        else:  # narrow: the channel list is folded away
+            page.evaluate("document.querySelector('#threads button[data-thread=wide]').click()")
+        page.wait_for_selector(".msg.reply.rich table")
+        page.click(".work summary")
+        for step in page.locator(".work .step.shell summary").all():
+            step.click()
+        page.wait_for_selector(".step-command")
+
+        # Markdown: what it reads, and what it leaves as text.
+        reply = page.locator(".msg.reply .bubble")
+        assert reply.locator("h4").inner_text() == "结果" and reply.locator("strong").count() == 1
+        assert reply.locator("em").inner_text() == "AWS EC2"
+        assert reply.locator("a").count() == 2 and reply.locator("a").nth(1).get_attribute("target") == "_blank"
+        assert reply.locator("pre code").count() == 1 and reply.locator("ol li").count() == 2
+        assert reply.locator("blockquote").count() == 1 and reply.locator("hr").count() == 1
+        assert reply.locator("script").count() == 0 and "<script>" in reply.locator("blockquote").inner_text()
+
+        # Nothing is wider than the room it has: no sideways scrolling anywhere.
+        wide = page.evaluate("""() => {
+            const bad = [];
+            for (const box of [document.scrollingElement, document.querySelector('#messages')]) {
+                if (box.scrollWidth > box.clientWidth + 1) bad.push(`${box.id || box.tagName} ${box.scrollWidth}>${box.clientWidth}`);
+            }
+            const right = document.querySelector('#messages').getBoundingClientRect().right;
+            for (const node of document.querySelectorAll('#messages *')) {
+                const r = node.getBoundingClientRect();
+                if (r.width && r.right > right + 1) bad.push(`${node.tagName}.${node.className} ${Math.round(r.right)}>${Math.round(right)}`);
+                if (node.scrollWidth > node.clientWidth + 1 && getComputedStyle(node).overflowX !== 'hidden'
+                    && ['auto', 'scroll'].includes(getComputedStyle(node).overflowX)) bad.push(`scrolls: ${node.tagName}.${node.className}`);
+            }
+            return bad;
+        }""")
+        assert wide == [], wide[:8]
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-wide-{width}.png")
         assert errors == []
         browser.close()

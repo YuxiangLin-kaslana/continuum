@@ -40,6 +40,19 @@
   };
   add('main', 'user', '帮我核对一下 Laser Control Board 的供应商报价');
   add('main', 'acknowledgement', '收到，开始处理：核对 Laser Control Board 的供应商报价', 't-1');
+  // A conversation made to be too wide: long commands, a wide table, code, a long URL.
+  add('wide', 'user', '我现在能看到多少台服务器？', 't-9');
+  step('wide', 't-9', 'w1', 'shell', 'hostname; whoami; cat /etc/hosts 2>/dev/null; echo "---"; env | grep -i -E "server|host|ssh|inventory" 2>/dev/null | head -20; ls -la ~/.ssh ~/.aws ~/.kube /etc/ssh 2>&1', 'done', '[exit code 0]\n' + 'x'.repeat(400));
+  step('wide', 't-9', 'w2', 'shell', 'echo "HOME=$HOME"\nls -la $HOME 2>&1 | head\necho "=== aws config"; ls -la $HOME/.aws 2>&1', 'done', '[exit code 0]\nok');
+  add('wide', 'reply', [
+    '#### 结果', '我这边看不到任何外部服务器，只有 1 台：**ip-172-31-14-189.eu-west-2.compute.internal**，*AWS EC2*。',
+    '详见 https://ai-api.yuxianglin.xyz/api/v1/very/long/path/that/keeps/going/and/going/without/any/break/at/all/0123456789 。',
+    '[文档](https://example.com/docs)', '> 这是引用，<script>alert(1)</script> 不会执行', '---',
+    '| 名字 | 地址 | 说明 | 另一个很长很长的列 | 再来一列 |', '|---|---|---|---|---|',
+    '| parts-catalog-deploy-and-something-long | 34.56.245.201 | 超长说明' + '文字'.repeat(30) + ' | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | b |',
+    '```bash', 'for h in $(cat hosts); do ssh -o BatchMode=yes -o ConnectTimeout=5 "$h" hostname || echo "$h unreachable"; done # ' + 'x'.repeat(120), '```',
+    '1. 第一', '2. 第二',
+  ].join('\n'), 't-9');
   step('main', 't-1', 'k1', 'think', '4', 'done', '先把三家的报价单读进来，按料号对齐，再比单价和封装。');
   step('main', 't-1', 'k2', 'read_file', 'quotes/vendor_a.csv', 'done', 'part,package,price\nR12,0402,0.012\n…');
   step('main', 't-1', 'k3', 'shell', 'python3 compare.py quotes/', 'done', '[exit code 0]\n4 differences found');

@@ -330,3 +330,26 @@ form#setup-form label .i { color: var(--soft); }
 .update button { margin-left: auto; }
 .version-row { display: flex; align-items: center; gap: 12px; }
 .version-row .hint { flex: 1; }
+
+/* --- only ever scroll up and down: everything wraps to the width it has --- */
+html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
+.messages > li, .work, .work-box, .work-steps, .step, .step details, .bubble, .card { min-width: 0; max-width: 100%; }
+.work-steps { grid-template-columns: minmax(0, 1fr); }
+.step summary { align-items: flex-start; }
+.step summary > .i, .step-state { margin-top: 2px; }
+.step-input { flex: 1 1 auto; white-space: pre-wrap; overflow-wrap: anywhere; text-overflow: clip; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.step-command { margin: 4px 0 0; padding: 8px 10px; background: #0b1416; border: 1px solid #1b2e31; font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; line-height: 1.55; color: var(--teal); white-space: pre-wrap; overflow-wrap: anywhere; }
+.step-output { overflow-x: hidden; overflow-y: auto; }
+.conv-head h2, .card-title, .detail dd, .msg .bubble { overflow-wrap: anywhere; }
+.msg.reply .bubble > p { white-space: normal; }
+.bubble table { table-layout: fixed; }
+.bubble th, .bubble td { overflow-wrap: anywhere; word-break: break-word; }
+.bubble code { overflow-wrap: anywhere; }
+.bubble pre { margin: 6px 0 8px; padding: 9px 11px; background: #070a0c; border: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.55; }
+.bubble pre code { color: var(--soft); font-size: inherit; }
+.bubble blockquote { margin: 4px 0 8px; padding: 2px 0 2px 12px; border-left: 2px solid var(--line-2); color: var(--soft); }
+.bubble hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+.bubble a { color: var(--teal); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.bubble em { font-style: italic; color: #e6edf0; }
+.bubble ol { padding-left: 22px; }
+.step details[open]:has(> .step-command) > summary .step-input { display: none; }
