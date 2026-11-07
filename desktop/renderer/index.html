@@ -590,8 +590,6 @@ l-33 -150 -4 -901 -3 -902 25 -28 24 -29 291 0 c277 0 291 1 310 20 20 20 20
           <button id="tab-chat" role="tab" aria-selected="true" data-view="chat"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>对话</button>
           <span class="tab-sep" aria-hidden="true"></span>
           <button id="tab-projects" role="tab" aria-selected="false" data-view="projects"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="m3 13 9 5 9-5"/></svg>项目<span id="badge" class="badge" hidden></span></button>
-          <span class="tab-sep" aria-hidden="true"></span>
-          <button id="tab-workers" role="tab" aria-selected="false" data-view="workers"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>Worker<span id="busy" class="badge teal" hidden></span></button>
         </nav>
         <div class="who">
           <span id="dot" class="dot" title="连接状态"></span>
@@ -603,12 +601,11 @@ l-33 -150 -4 -901 -3 -902 25 -28 24 -29 291 0 c277 0 291 1 310 20 20 20 20
       </header>
 
       <div id="view-chat" class="view chat">
-        <aside class="channels">
-          <div class="channels-head"><span>项目</span><span class="en" aria-hidden="true">PROJECTS</span></div>
-          <ul id="threads" class="thread-list" role="listbox" aria-label="项目"></ul>
-        </aside>
         <div class="conversation">
-          <div class="conv-head"><h2 id="thread-title">主对话</h2><span id="thread-no" class="thread-no" aria-hidden="true">#001</span></div>
+          <div class="chat-tools">
+            <div class="search-box"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><label for="search" class="sr">搜索对话</label><input id="search" type="search" placeholder="搜索对话" autocomplete="off" spellcheck="false"></div>
+            <div id="search-results" class="search-results" role="listbox" aria-label="搜索结果" hidden></div>
+          </div>
           <ol id="messages" class="messages" aria-live="polite"></ol>
           <div id="empty-chat" class="empty" hidden>
             <span class="en" aria-hidden="true">NO MESSAGES YET</span>
@@ -623,19 +620,36 @@ l-33 -150 -4 -901 -3 -902 25 -28 24 -29 291 0 c277 0 291 1 310 20 20 20 20
       </div>
 
       <div id="view-projects" class="view tickets projects" hidden>
-        <div class="tickets-head"><h2 class="section-head"><span class="slash" aria-hidden="true">//</span><span class="en" aria-hidden="true">PROJECTS</span>项目</h2></div>
-        <div id="projects"></div>
-        <div id="empty-projects" class="empty" hidden>
-          <span class="en" aria-hidden="true">NO PROJECTS YET</span>
-          <p>还没有项目。在对话里交代一件事，它就会出现在这里；要长期做的事，助理会提议一个长期项目给你确认。</p>
+        <div id="projects-overview">
+          <div class="tickets-head"><h2 class="section-head"><span class="slash" aria-hidden="true">//</span><span class="en" aria-hidden="true">PROJECTS</span>项目与 Worker</h2></div>
+          <div class="segments" role="tablist">
+            <button id="seg-projects" role="tab" data-seg="projects" aria-selected="true">项目</button>
+            <button id="seg-workers" role="tab" data-seg="workers" aria-selected="false">Worker<span id="busy" class="badge teal" hidden></span></button>
+          </div>
+          <div id="panel-projects">
+            <div id="projects"></div>
+            <div id="empty-projects" class="empty" hidden>
+              <span class="en" aria-hidden="true">NO PROJECTS YET</span>
+              <p>还没有项目。在对话里交代一件事，它就会出现在这里；要长期做的事，助理会提议一个长期项目给你确认。</p>
+            </div>
+          </div>
+          <div id="panel-workers" class="workers" hidden>
+            <div id="worker-stats" class="stats"></div>
+            <div id="worker-tools" class="stats tools"></div>
+            <div id="workers"></div>
+          </div>
         </div>
-      </div>
-
-      <div id="view-workers" class="view tickets workers" hidden>
-        <div class="tickets-head"><h2 class="section-head"><span class="slash" aria-hidden="true">//</span><span class="en" aria-hidden="true">WORKERS</span>Worker</h2></div>
-        <div id="worker-stats" class="stats"></div>
-        <div id="worker-tools" class="stats tools"></div>
-        <div id="workers"></div>
+        <div id="project-detail" hidden>
+          <button id="project-back" class="back" type="button">← 全部项目</button>
+          <div id="project-card"></div>
+          <div class="group-row working"><h3 class="group">这个项目的对话</h3><span class="en" aria-hidden="true">CONVERSATION</span></div>
+          <ol id="project-messages" class="messages project-messages" aria-live="polite"></ol>
+          <form id="project-composer" class="composer">
+            <label for="project-input" class="sr">对这个项目说</label>
+            <textarea id="project-input" rows="1"></textarea>
+            <button id="project-send" type="submit" class="send" title="发送" aria-label="发送"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 21 3l-8 18-2-8z"/><path d="m11 13 4-4"/></svg></button>
+          </form>
+        </div>
       </div>
 
       <div id="view-settings" class="view tickets settings" hidden>

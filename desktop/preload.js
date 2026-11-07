@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('continuum', {
   workers: call('api:workers'),
   everything: call('api:everything'),
   allSteps: call('api:allSteps'),
+  search: call('api:search'),
   projects: call('api:projects'),
   projectAction: call('api:projectAction'),
   setTimezone: call('api:setTimezone'),

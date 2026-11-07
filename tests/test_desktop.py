@@ -83,14 +83,11 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         page.fill("#password", "good-password")
         page.click("#connect")
         page.wait_for_selector("#main:not([hidden])")
-        page.wait_for_selector("#threads [data-project=ops1]")
+        page.wait_for_selector("#badge:not([hidden])")
         assert page.inner_text("#user") == "me" and page.evaluate("window.__fake.timezone")
-        # One conversation: everything said, whatever project it belongs to; the projects down the side.
+        # The conversation tab is only the conversation: everything said, nothing about projects around it.
         assert page.locator(".msg").count() == 9
-        assert page.eval_on_selector_all("#threads button[data-project]", "ns => ns.map(n => n.dataset.project)") == [
-            "main", "ops1", "t-1", "t-2"]
-        assert "已归档 3" in page.inner_text("#threads")
-        assert page.inner_text("#thread-title") == "主对话" and page.inner_text("#thread-no") == "全部消息"
+        assert page.locator(".channels, .project-chip, #threads").count() == 0
         assert page.inner_text("#badge") == "1"  # one project waits for an answer
 
         # Avatars are drawn from the names: the person's and the assistant's.
@@ -101,27 +98,30 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         page.locator(".work summary").first.click()
         assert "python3 compare.py quotes/" in page.locator(".work .step.shell").first.inner_text()
 
-        # The project list never scrolls sideways, however long a name.
-        assert page.evaluate("(() => { const l = document.querySelector('#threads'); return l.scrollWidth <= l.clientWidth + 1; })()")
+        # A reminder from a project arrives in the one conversation.
+        assert "记得看巡检结果" in page.inner_text(".msg.reminder")
 
-        # A reminder says which project it is from; opening the project narrows the conversation to it.
-        reminder = page.locator(".msg.reminder")
-        assert "记得看巡检结果" in reminder.inner_text()
-        reminder.get_by_role("button", name="# 服务器巡检").click()
-        assert page.inner_text("#thread-title") == "服务器巡检" and page.inner_text("#thread-no") == "长期项目 · 进行中"
-        assert [c.split()[1] for c in page.eval_on_selector_all(".msg", "ns => ns.map(n => n.className)")] == [
+        # Projects live on their own tab; opening one shows its own part of the conversation, and talking there
+        # addresses it (the whole conversation shows that too).
+        page.click("#tab-projects")
+        page.locator(".card.project[data-project=ops1]").get_by_role("button", name="打开").click()
+        page.wait_for_selector("#project-detail:not([hidden])")
+        assert "服务器巡检" in page.inner_text("#project-card") and "检查磁盘" in page.inner_text("#project-card")
+        assert [c.split()[1] for c in page.eval_on_selector_all("#project-messages .msg", "ns => ns.map(n => n.className)")] == [
             "reminder", "scheduled", "reply"]
-        assert page.locator(".project-chip").count() == 0
-        assert "仍在主对话里" in page.get_attribute("#input", "placeholder")
-        # Talking to the project: it goes to the project, and the whole conversation shows it too.
-        page.fill("#input", "阈值改成 90%")
-        page.press("#input", "Enter")
-        page.wait_for_selector(".msg.user >> text=阈值改成 90%")
-        page.wait_for_selector(".msg.reply >> text=已处理「阈值改成 90%」")
+        assert page.locator("#messages .msg").count() == 0  # one place shows the conversation at a time
+        assert "仍在主对话里" in page.get_attribute("#project-input", "placeholder")
+        page.fill("#project-input", "阈值改成 90%")
+        page.press("#project-input", "Enter")
+        page.wait_for_selector("#project-messages .msg.user >> text=阈值改成 90%")
+        page.wait_for_selector("#project-messages .msg.reply >> text=已处理「阈值改成 90%」")
         assert page.evaluate("window.__fake.messages.find(m => m.text === '阈值改成 90%').thread") == "p-ops1"
-        page.click("#threads [data-project=main]")
-        assert page.locator(".msg.user >> text=阈值改成 90%").count() == 1
-        assert page.locator(".msg.user", has_text="阈值改成 90%").get_by_role("button", name="# 服务器巡检").count() == 1
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-project.png")
+        page.click("#project-back")
+        assert page.is_visible("#projects-overview")
+        page.click("#tab-chat")
+        assert page.locator("#messages .msg.user >> text=阈值改成 90%").count() == 1
 
         # A message: its acknowledgement, the worker thinking and running a command as it happens, then the answer
         # written as it comes, which gives way to the reply itself. The request becomes a project of its own.
@@ -141,7 +141,6 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         assert page.locator(".msg.streaming").count() == 0 and page.locator(".work.running").count() == 0
         roles = [c.split()[1] for c in page.eval_on_selector_all(".msg", "ns => ns.map(n => n.className)")]
         assert roles[-3:] == ["user", "acknowledgement", "reply"] and page.input_value("#input") == ""
-        page.wait_for_selector("#threads >> text=顺便核一下交期")
         # The assistant's words are not boxed; the person's are.
         styles = page.evaluate("""() => ['.msg.reply .bubble', '.msg.user .bubble'].map(s => {
             const c = getComputedStyle(document.querySelector(s)); return [c.borderTopWidth, c.backgroundColor]; })""")
@@ -151,18 +150,20 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
             page.screenshot(path=f"{SHOTS}/desktop-chat.png")
 
         # An archived project: replies render a little Markdown, and nothing in them becomes markup of its own.
-        page.click("#threads >> text=已归档 3")
-        page.click("#threads [data-project=t-4]")
-        page.wait_for_selector(".msg.reply.rich table")
-        assert page.inner_text("#thread-no") == "一次性 · 已结束"
-        assert page.locator(".msg.reply td").count() == 6 and page.locator(".msg.reply li").count() == 2
-        assert page.locator(".msg.reply b").count() == 0 and "<b>未</b>" in page.inner_text(".msg.reply ul")
+        page.click("#tab-projects")
+        page.locator(".card.project[data-project=t-4]").get_by_role("button", name="打开").click()
+        page.wait_for_selector("#project-messages .msg.reply.rich table")
+        assert "已完成" in page.inner_text("#project-card")
+        reply = page.locator("#project-messages .msg.reply")
+        assert reply.locator("td").count() == 6 and reply.locator("li").count() == 2
+        assert reply.locator("b").count() == 0 and "<b>未</b>" in reply.locator("ul").inner_text()
         if SHOTS:
             page.wait_for_timeout(400)
             page.screenshot(path=f"{SHOTS}/desktop-rich.png")
+        page.click("#project-back")
 
         # Something to do every day: the assistant proposes a long-running project, and the person confirms it.
-        page.click("#threads [data-project=main]")
+        page.click("#tab-chat")
         page.fill("#input", "以后每天提醒我看交期")
         page.press("#input", "Enter")
         card = page.locator(".proposal-card")
@@ -175,11 +176,10 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         card.get_by_role("button", name="确认开始").click()
         page.wait_for_selector(".proposal-card >> text=已确认 · 进行中")
         page.wait_for_selector(".msg.notice >> text=项目「每日交期提醒」开始了")
-        page.wait_for_selector("#threads [data-project=new1]")
 
         # The projects page: what waits for the person first; a stop and an end ask once more before they act.
         page.click("#tab-projects")
-        page.wait_for_selector(".card.project")
+        page.wait_for_selector(".card.project[data-project=new1]")
         groups = page.locator("#projects .group").all_inner_texts()
         assert groups[0] == "等你处理 01" and groups[1] == "长期项目 02" and groups[-1].startswith("已归档")
         assert "0402 还是 0603" in page.inner_text(".card.project.person .question")
@@ -199,8 +199,8 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
 
         # "去回答" opens the project the question belongs to.
         page.locator(".card.project.person").get_by_role("button", name="去回答").click()
-        assert page.is_visible("#view-chat") and page.inner_text("#thread-title").startswith("核对 Laser")
-        assert page.locator(".msg").count() == 1 and page.locator(".work").count() == 1
+        assert page.is_visible("#project-detail") and "核对 Laser" in page.inner_text("#project-card")
+        assert page.locator("#project-messages .msg").count() == 1 and page.locator("#project-messages .work").count() == 1
         assert errors == []
         browser.close()
 
@@ -309,9 +309,7 @@ def test_nothing_in_a_conversation_scrolls_sideways_and_markdown_renders(width):
         page.fill("#password", "good-password")
         page.click("#connect")
         page.wait_for_selector("#main:not([hidden])")
-        # The archived project made to be too wide (narrow windows fold the list away, so it is opened directly).
-        page.evaluate("document.querySelector('#threads .toggle button').click()")
-        page.evaluate("document.querySelector('#threads [data-project=\"t-9\"]').click()")
+        # The one conversation holds a reply made to be too wide.
         page.wait_for_selector(".msg.reply.rich table")
         # Open every step, the widest the conversation gets (this test is about layout, not about clicking).
         page.evaluate("document.querySelectorAll('#messages details').forEach((d) => { d.open = true; })")
@@ -319,7 +317,7 @@ def test_nothing_in_a_conversation_scrolls_sideways_and_markdown_renders(width):
         assert page.locator(".step-command").count() == 2
 
         # Markdown: what it reads, and what it leaves as text.
-        reply = page.locator(".msg.reply .bubble")
+        reply = page.locator(".msg.reply", has_text="我这边看不到任何外部服务器").locator(".bubble")
         assert reply.locator("h4").inner_text() == "结果" and reply.locator("strong").count() == 1
         assert reply.locator("em").inner_text() == "AWS EC2"
         assert reply.locator("a").count() == 2 and reply.locator("a").nth(1).get_attribute("target") == "_blank"
@@ -403,10 +401,10 @@ def test_the_workers_page_counts_what_runs_and_what_ran():
         page.fill("#password", "good-password")
         page.click("#connect")
         page.wait_for_selector("#main:not([hidden])")
+        page.click("#tab-projects")
+        page.click("#seg-workers")
         page.wait_for_selector("#busy:not([hidden])")
         assert page.inner_text("#busy") == "1"
-
-        page.click("#tab-workers")
         page.wait_for_selector(".card.worker.busy")
         stats = page.locator("#worker-stats .stat").all_inner_texts()
         assert stats[0].split() == ["1/3", "正在干活", "/", "上限"] and "累计调用 Worker" in stats[2]
@@ -421,6 +419,50 @@ def test_the_workers_page_counts_what_runs_and_what_ran():
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-workers.png")
         page.locator(".card.worker.busy").get_by_role("button", name="查看对话").click()
-        assert page.is_visible("#view-chat")
+        assert page.is_visible("#project-detail") and "整理本周交期变化" in page.inner_text("#project-card")
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.skipif(_browser() is None, reason="needs playwright")
+def test_searching_the_conversation_finds_and_goes_to_a_message():
+    sync_playwright = _browser()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        page = browser.new_context(viewport={"width": 520, "height": 780}, bypass_csp=True).new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.add_init_script(path=str(DESKTOP / "test" / "fake-bridge.js"))
+        page.goto((DESKTOP / "renderer" / "index.html").as_uri())
+        page.wait_for_selector("#app[data-ready]")
+        page.fill("#username", "me")
+        page.fill("#password", "good-password")
+        page.click("#connect")
+        page.wait_for_selector("#main:not([hidden])")
+
+        page.fill("#search", "报价")
+        page.wait_for_selector("#search-results:not([hidden]) .search-hit")
+        hits = page.locator(".search-hit")
+        assert page.inner_text(".search-count") == f"找到 {hits.count()} 条" and hits.count() == 4
+        assert hits.first.locator("mark").first.inner_text() == "报价"
+        # What a message says is shown as text, never as markup.
+        page.fill("#search", "<b>")
+        page.wait_for_selector(".search-hit mark >> text=<b>")
+        assert page.locator(".search-hit b:not(:first-child)").count() == 0
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-search.png")
+
+        # Going to a result scrolls the conversation to it and marks it for a moment.
+        page.fill("#search", "Laser")
+        page.wait_for_selector(".search-hit >> text=帮我核对一下")
+        page.locator(".search-hit", has_text="帮我核对一下").click()
+        assert page.is_hidden("#search-results")
+        page.wait_for_selector("#messages .msg.flash >> text=帮我核对一下 Laser Control Board 的供应商报价")
+
+        page.fill("#search", "没有这句话")
+        page.wait_for_selector(".search-none")
+        assert page.inner_text(".search-none") == "没有找到「没有这句话」"
+        page.press("#search", "Escape")
+        assert page.input_value("#search") == "" and page.is_hidden("#search-results")
         assert errors == []
         browser.close()

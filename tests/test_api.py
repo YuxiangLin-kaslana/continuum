@@ -238,3 +238,29 @@ def test_the_workers_page_shows_what_runs_now_and_what_ran(tmp_path):
             await rt.close()
 
     asyncio.run(main())
+
+
+def test_searching_the_conversation_finds_the_persons_own_messages_as_typed(tmp_path):
+    async def main():
+        rt = app_runtime(tmp_path, allowed=("ann", "bob"))
+        ann = {"Authorization": f"Bearer {rt.accounts.add('ann')}"}
+        bob = {"Authorization": f"Bearer {rt.accounts.add('bob')}"}
+        port, runner = await serve(rt)
+        try:
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client:
+                for text in ["检查 BOM 报价", "交期 100% 确认", "交期 100x 确认", "file_name.txt"]:
+                    await client.post("/api/v1/threads/main/messages", headers=ann, json={"text": text})
+                await client.post("/api/v1/threads/main/messages", headers=bob, json={"text": "bob 的报价"})
+                found = lambda q, who=ann: client.get("/api/v1/search", params={"q": q}, headers=who)  # noqa: E731
+                assert [m["text"] for m in (await found("报价")).json() if m["role"] == "user"] == ["检查 BOM 报价"]
+                # What is typed is looked for as it is: % and _ are not wildcards.
+                mine = lambda rows: [m["text"] for m in rows if m["role"] == "user"]  # noqa: E731
+                assert mine((await found("100%")).json()) == ["交期 100% 确认"]
+                assert mine((await found("e_n")).json()) == ["file_name.txt"]
+                assert mine((await found("报价", bob)).json()) == ["bob 的报价"]
+                assert (await found("")).status_code == 422
+        finally:
+            runner.cancel()
+            await rt.close()
+
+    asyncio.run(main())

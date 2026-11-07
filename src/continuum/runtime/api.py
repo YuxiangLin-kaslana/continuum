@@ -241,6 +241,13 @@ def create_app(rt: Runtime) -> FastAPI:
         _, by_ticket = project_index(user)
         return [tag(m, by_ticket) for m in kind.everything(ctx, user, after)]
 
+    @app.get("/api/v1/search")
+    async def search(q: str = Query(min_length=1, max_length=200), user: str = Depends(user_of)) \
+            -> list[dict[str, Any]]:
+        kind, ctx = source()
+        _, by_ticket = project_index(user)
+        return [tag(m, by_ticket) for m in kind.search(ctx, user, q.strip() or q)]
+
     @app.get("/api/v1/steps")
     async def all_steps(user: str = Depends(user_of)) -> list[dict[str, Any]]:
         kind, ctx = source()

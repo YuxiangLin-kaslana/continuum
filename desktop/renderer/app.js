@@ -7,7 +7,8 @@
   const state = {
     user: '', connection: 'offline', view: 'chat',
     // The conversation is one; `focus` is the project it is narrowed to (null: everything).
-    focus: null, messages: new Map(), projects: [], unread: new Set(), archived: false,
+    // `focus`: the project open on the projects tab (null: the list); `seg`: projects or workers there.
+    focus: null, seg: 'projects', messages: new Map(), projects: [],
     // What the workers do: their steps (kept by the server), and what is live only now: the answer being written
     // and the model thinking, per ticket, each with its project.
     steps: new Map(), streams: new Map(), thinking: new Map(),
@@ -250,7 +251,6 @@
     state.messages.clear();
     state.projects = [];
     state.shown.clear();
-    state.unread.clear();
     state.steps.clear();
     state.streams.clear();
     state.thinking.clear();
@@ -286,11 +286,30 @@
     $('view-chat').hidden = view !== 'chat';
     $('view-projects').hidden = view !== 'projects';
     $('view-settings').hidden = view !== 'settings';
-    $('view-workers').hidden = view !== 'workers';
-    if (view === 'workers') loadWorkers();
     $('settings').setAttribute('aria-pressed', String(view === 'settings'));
-    if (view === 'chat') $('input').focus();
+    if (view === 'projects') showProjectsTab();
+    if (view === 'chat') {
+      renderMessages(true);
+      $('input').focus();
+    }
     if (view === 'settings') loadSsh();
+  }
+
+  // The projects tab: the list of projects or of workers, or one project with its own part of the conversation.
+  function showProjectsTab() {
+    const project = state.focus ? projectById(state.focus) : null;
+    $('projects-overview').hidden = Boolean(project);
+    $('project-detail').hidden = !project;
+    for (const button of document.querySelectorAll('.segments button')) {
+      button.setAttribute('aria-selected', String(button.dataset.seg === state.seg));
+    }
+    $('panel-projects').hidden = state.seg !== 'projects';
+    $('panel-workers').hidden = state.seg !== 'workers';
+    if (project) renderProjectDetail(project);
+    else if (state.seg === 'workers') loadWorkers();
+  }
+  for (const button of document.querySelectorAll('.segments button')) {
+    button.addEventListener('click', () => { state.seg = button.dataset.seg; showProjectsTab(); });
   }
   for (const button of document.querySelectorAll('.tabs button')) {
     button.addEventListener('click', () => setView(button.dataset.view));
@@ -306,20 +325,17 @@
     return state.projects.find((p) => p.id === id) || null;
   }
 
-  function projectName(id, meta) {
-    const project = projectById(id);
-    return project ? project.name : (meta && meta.project_name) || '项目';
-  }
-
   async function loadProjects() {
     try {
       state.projects = await call('projects');
     } catch (error) {
       showStatus(error.message);
     }
-    renderSidebar();
     renderProjects();
-    renderHead();
+    if (state.view === 'projects' && state.focus) {
+      const project = projectById(state.focus);
+      if (project) $('project-card').replaceChildren(projectCard(project, true));
+    }
     // Messages that name a project (a proposal, a reminder) read better once the project is known.
     if (!$('main').hidden) renderMessages();
   }
@@ -330,65 +346,47 @@
     projectsSoon = setTimeout(() => { projectsSoon = null; loadProjects(); }, 400);
   }
 
-  function sideItem(id, label, iconName, note) {
-    const item = el('li');
-    const button = el('button', state.unread.has(id) ? 'unread' : '');
-    button.setAttribute('role', 'option');
-    button.setAttribute('aria-selected', String(id === state.focus));
-    button.dataset.project = id || 'main';
-    button.append(icon(iconName), el('span', 'side-name', label));
-    if (note) button.append(el('span', 'side-note', note));
-    button.addEventListener('click', () => openProject(id));
-    item.append(button);
-    return item;
-  }
-
-  function renderSidebar() {
-    const ongoing = state.projects.filter((p) => p.kind === 'ongoing' && p.state !== 'ended');
-    const open = state.projects.filter((p) => p.kind === 'once' && p.state !== 'ended');
-    const archived = state.projects.filter((p) => p.state === 'ended');
-    const items = [sideItem(null, '主对话', 'chat')];
-    const head = (text) => items.push(el('li', 'side-head', text));
-    const note = (p) => (p.state === 'proposed' || p.state === 'waiting' || p.question ? '!' : p.state === 'paused' ? '停' : '');
-    if (ongoing.length) {
-      head('长期项目');
-      for (const p of ongoing) items.push(sideItem(p.id, p.name, 'repeat', note(p)));
-    }
-    if (open.length) {
-      head('进行中');
-      for (const p of open) items.push(sideItem(p.id, p.name, 'hash', note(p)));
-    }
-    if (archived.length) {
-      const toggle = el('li', 'side-head toggle');
-      const button = el('button', '', `${state.archived ? '收起已归档' : '已归档'} ${archived.length}`);
-      button.addEventListener('click', () => { state.archived = !state.archived; renderSidebar(); });
-      toggle.append(button);
-      items.push(toggle);
-      if (state.archived) for (const p of archived.slice(0, 30)) items.push(sideItem(p.id, p.name, 'check'));
-    }
-    $('threads').replaceChildren(...items);
-  }
-
-  function renderHead() {
-    const project = state.focus ? projectById(state.focus) : null;
-    $('thread-title').textContent = project ? project.name : '主对话';
-    $('thread-no').textContent = project
-      ? `${project.kind === 'ongoing' ? '长期项目' : '一次性'} · ${PROJECT_STATES[project.state] || project.state}`
-      : '全部消息';
-    const closed = Boolean(project && project.kind === 'ongoing' && (project.state === 'ended' || project.state === 'refused'));
-    $('input').placeholder = closed ? '这个项目已经结束了'
-      : project ? `对「${project.name}」说（仍在主对话里）` : '输入消息，Enter 发送';
-    $('input').disabled = closed;
-  }
-
   function openProject(id) {
     state.focus = id;
-    if (id) state.unread.delete(id);
-    setView('chat');
-    renderSidebar();
-    renderHead();
+    setView('projects');
+  }
+
+  $('project-back').addEventListener('click', () => {
+    state.focus = null;
+    showProjectsTab();
+  });
+
+  function renderProjectDetail(project) {
+    $('project-card').replaceChildren(projectCard(project, true));
+    const closed = project.kind === 'ongoing' && (project.state === 'ended' || project.state === 'refused');
+    $('project-input').placeholder = closed ? '这个项目已经结束了' : `对「${project.name}」说（仍在主对话里）`;
+    $('project-input').disabled = closed;
     renderMessages(true);
   }
+
+  $('project-composer').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const project = projectById(state.focus);
+    const text = $('project-input').value.trim();
+    if (!text || !project) return;
+    $('project-send').disabled = true;
+    try {
+      const row = await call('post', project.thread || 'main', text);
+      $('project-input').value = '';
+      addMessage(row);
+      showStatus('');
+    } catch (error) {
+      showStatus(`没发出去：${error.message}`);
+    } finally {
+      $('project-send').disabled = false;
+    }
+  });
+  $('project-input').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      $('project-composer').requestSubmit();
+    }
+  });
 
   // --- the conversation: everything said, each message with the project it belongs to ---
 
@@ -405,19 +403,15 @@
     await loadProjects();
   }
 
+  // Whether something of this project is on screen: the conversation shows everything; an open project, its own.
   function visible(project) {
-    return state.focus === null || project === state.focus;
+    return state.view === 'chat' || (state.view === 'projects' && state.focus !== null && project === state.focus);
   }
 
   function addMessage(row, render = true) {
-    const fresh = !state.messages.has(row.id);
     state.messages.set(row.id, row);
     // The answer arrived: what was being written gives way to it.
     if (row.ticket_id && !['user', 'acknowledgement', 'scheduled'].includes(row.role)) state.streams.delete(row.ticket_id);
-    if (fresh && row.project && !visible(row.project) && row.role !== 'user') {
-      state.unread.add(row.project);
-      renderSidebar();
-    }
     if (row.project && !projectById(row.project)) projectsChanged();
     if (render) renderMessages();
   }
@@ -425,6 +419,7 @@
   function message(m) {
     if (m.role === 'proposal') return proposal(m);
     const item = el('li', `msg ${m.role}`);
+    item.dataset.id = m.id;
     const mine = m.role === 'user';
     const face = mine ? avatar(m.user || state.user, false) : avatar(ASSISTANT, true);
     const bubble = el('div', 'bubble');
@@ -439,15 +434,7 @@
     } else {
       bubble.textContent = m.text;
     }
-    const meta = el('div', 'meta');
-    meta.append(el('span', '', time(m.at)));
-    // In the whole conversation, a message says which project it belongs to; in a project, that goes without saying.
-    if (m.project && state.focus === null) {
-      const chip = el('button', 'project-chip', `# ${projectName(m.project, m.meta)}`);
-      chip.addEventListener('click', () => openProject(m.project));
-      meta.append(chip);
-    }
-    item.append(face, bubble, meta);
+    item.append(face, bubble, el('div', 'meta', time(m.at)));
     return arrival(item, `m:${m.id}`);
   }
 
@@ -458,6 +445,7 @@
     let decided = meta.state && meta.state !== 'proposed' ? meta.state : null;
     if (!decided && project && project.state !== 'proposed') decided = project.state;
     const item = el('li', 'msg proposal');
+    item.dataset.id = m.id;
     const card = el('div', 'proposal-card');
     const head = el('div', 'proposal-head');
     head.append(icon('repeat'), el('span', '', `提议一个长期项目：${meta.project_name || (project && project.name) || ''}`));
@@ -612,9 +600,20 @@
     return item;
   }
 
+  // The conversation where it is on screen: all of it on the conversation tab, an open project's part on its page.
+  function timelineBox() {
+    if (state.view === 'chat') return { box: $('messages'), scroller: $('messages') };
+    if (state.view === 'projects' && state.focus) return { box: $('project-messages'), scroller: $('view-projects') };
+    return null;
+  }
+
   function renderMessages(toBottom = false) {
-    const box = $('messages');
-    const near = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+    const where = timelineBox();
+    if (!where) return;
+    const { box, scroller } = where;
+    // Only one place shows the conversation at a time, so the live parts (an answer being written) are not doubled.
+    for (const other of [$('messages'), $('project-messages')]) if (other !== box) other.replaceChildren();
+    const near = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 60;
     const list = [...state.messages.values()].filter((m) => visible(m.project)).sort((a, b) => a.id - b.id);
     const steps = [...state.steps.values()].filter((s) => visible(s.project));
     // Messages and steps in the order they happened; the steps of one ticket in a row share a box.
@@ -652,8 +651,8 @@
       if (visible(live.project)) nodes.push(streamItem(ticket, live.text));
     }
     box.replaceChildren(...nodes);
-    $('empty-chat').hidden = nodes.length > 0;
-    if (toBottom || near) box.scrollTop = box.scrollHeight;
+    if (box === $('messages')) $('empty-chat').hidden = nodes.length > 0;
+    if (toBottom || near) scroller.scrollTop = scroller.scrollHeight;
   }
 
   // The answer as it is written: only its bubble changes, so the rest of the conversation stays as it is.
@@ -664,12 +663,12 @@
       if (live && visible(live.project)) renderMessages();
       return;
     }
-    const box = $('messages');
-    const near = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+    const { scroller } = timelineBox() || { scroller: $('messages') };
+    const near = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 60;
     const { html, rich } = markdown(live.text);
     node.querySelector('.bubble').innerHTML = html;
     node.classList.toggle('rich', rich);
-    if (near) box.scrollTop = box.scrollHeight;
+    if (near) scroller.scrollTop = scroller.scrollHeight;
   }
 
   $('composer').addEventListener('submit', async (event) => {
@@ -678,8 +677,7 @@
     if (!text) return;
     $('send').disabled = true;
     try {
-      const project = state.focus ? projectById(state.focus) : null;
-      const row = await call('post', (project && project.thread) || 'main', text);
+      const row = await call('post', 'main', text);
       $('input').value = '';
       autosize();
       addMessage(row);
@@ -705,6 +703,100 @@
     }
   });
 
+  // --- search: the whole conversation, on the server, so older messages are found too ---
+
+  const WHO = {
+    user: '你', reply: '助理', acknowledgement: '助理', reminder: '提醒', scheduled: '定时任务', notice: '助理',
+    proposal: '项目提议',
+  };
+
+  // The words around the first match, escaped, with every match marked.
+  function snippet(text, query) {
+    const at = text.toLowerCase().indexOf(query.toLowerCase());
+    const start = Math.max(0, at - 30);
+    const part = (start ? '…' : '') + text.slice(start, start + 140) + (start + 140 < text.length ? '…' : '');
+    const lower = part.toLowerCase();
+    const needle = query.toLowerCase();
+    let out = '';
+    let i = 0;
+    for (let j = lower.indexOf(needle); j >= 0; j = lower.indexOf(needle, j + needle.length)) {
+      out += escape(part.slice(i, j)) + `<mark>${escape(part.slice(j, j + needle.length))}</mark>`;
+      i = j + needle.length;
+    }
+    return out + escape(part.slice(i));
+  }
+
+  let searchTimer = null;
+  let searchSeq = 0;
+  async function runSearch() {
+    const query = $('search').value.trim();
+    const box = $('search-results');
+    if (!query) {
+      box.hidden = true;
+      box.replaceChildren();
+      return;
+    }
+    const seq = ++searchSeq;
+    let rows;
+    try {
+      rows = await call('search', query);
+    } catch (error) {
+      rows = [];
+      showStatus(error.message);
+    }
+    if (seq !== searchSeq) return;  // a later search has started
+    box.replaceChildren();
+    box.hidden = false;
+    if (!rows.length) {
+      box.append(el('p', 'search-none', `没有找到「${query}」`));
+      return;
+    }
+    box.append(el('p', 'search-count', `找到 ${rows.length}${rows.length >= 50 ? '+' : ''} 条`));
+    for (const m of rows) {
+      const item = el('button', 'search-hit');
+      item.setAttribute('role', 'option');
+      item.dataset.id = m.id;
+      const head = el('span', 'search-head');
+      head.append(el('b', '', WHO[m.role] || m.role), el('span', '', `${day(m.at)} ${time(m.at)}`));
+      const text = el('span', 'search-text');
+      text.innerHTML = snippet(m.text, query);
+      item.append(head, text);
+      item.addEventListener('click', () => jumpTo(m, item));
+      box.append(item);
+    }
+  }
+
+  // Go to a found message in the conversation; one older than what is loaded opens in place instead.
+  function jumpTo(m, item) {
+    const node = document.querySelector(`#messages [data-id="${Number(m.id)}"]`);
+    if (!node) {
+      item.classList.toggle('open');
+      item.querySelector('.search-text').textContent = item.classList.contains('open') ? m.text : '';
+      if (!item.classList.contains('open')) item.querySelector('.search-text').innerHTML = snippet(m.text, $('search').value.trim());
+      return;
+    }
+    $('search-results').hidden = true;
+    node.scrollIntoView({ block: 'center' });
+    node.classList.remove('flash');
+    void node.offsetWidth;
+    node.classList.add('flash');
+  }
+
+  $('search').addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runSearch, 250);
+  });
+  $('search').addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      $('search').value = '';
+      runSearch();
+    } else if (event.key === 'Enter') {
+      clearTimeout(searchTimer);
+      runSearch();
+    }
+  });
+  $('search').addEventListener('focus', () => { if ($('search').value.trim()) $('search-results').hidden = false; });
+
   // --- the projects page: what waits for the person first, then what runs on its own, then the rest ---
 
   function stageText(p) {
@@ -717,7 +809,7 @@
     return p.state === 'proposed' || p.state === 'waiting' || Boolean(p.question);
   }
 
-  function projectCard(p) {
+  function projectCard(p, open = false) {
     const kind = needsPerson(p) ? 'person' : p.state === 'ended' || p.state === 'refused' ? 'ended' : 'working';
     const box = el('article', `card notched project ${kind} ${p.kind}`);
     box.dataset.project = p.id;
@@ -764,7 +856,7 @@
       button('不要', 'outline', () => projectAct(p.id, 'refuse'));
       button('确认开始', 'outline amber', () => projectAct(p.id, 'confirm'));
     } else {
-      button(p.question ? '去回答' : '打开', p.question ? 'outline amber' : 'outline', () => openProject(p.id));
+      if (!open) button(p.question ? '去回答' : '打开', p.question ? 'outline amber' : 'outline', () => openProject(p.id));
       if (p.kind === 'ongoing' && p.state === 'active') button('暂停', 'outline', () => projectAct(p.id, 'pause'));
       if (p.kind === 'ongoing' && p.state === 'paused') button('继续', 'outline', () => projectAct(p.id, 'resume'));
       if (p.kind === 'ongoing' && (p.state === 'active' || p.state === 'paused')) {
@@ -817,7 +909,7 @@
       if (!items.length) continue;
       const row = el('div', `group-row ${kind}`);
       row.append(el('h3', 'group', `${name} ${pad(items.length)}`), en(label));
-      box.append(row, ...items.map(projectCard));
+      box.append(row, ...items.map((p) => projectCard(p)));
     }
     $('empty-projects').hidden = all.length > 0;
     const waiting = groups[0][3].length;
@@ -901,7 +993,7 @@
     }
     $('busy').hidden = !page.busy_now;
     $('busy').textContent = String(page.busy_now);
-    if (state.view !== 'workers') return;
+    if (state.view !== 'projects' || state.seg !== 'workers' || state.focus) return;
     $('worker-stats').replaceChildren(
       tile(`${page.busy_now}/${page.max_workers}`, '正在干活 / 上限', page.busy_now ? 'live' : ''),
       tile(page.totals.waiting, '等待中'),
@@ -919,7 +1011,9 @@
     group('运行中', 'RUNNING', 'working', page.running, true);
     group('最近', 'RECENT', 'ended', page.recent, false);
     // While the page is open it keeps itself current.
-    workersTimer = setTimeout(() => { if (state.view === 'workers') loadWorkers(); }, 4000);
+    workersTimer = setTimeout(() => {
+      if (state.view === 'projects' && state.seg === 'workers' && !state.focus) loadWorkers();
+    }, 4000);
   }
 
   // The badge on the tab follows ticket changes, at most a few times a second.
@@ -1162,7 +1256,7 @@
       const step = event.step;
       state.steps.set(`${step.ticket_id}:${step.key}`, step);
       if (visible(step.project)) renderMessages();
-      if (state.view === 'workers') workersChanged();
+      if (state.view === 'projects' && state.seg === 'workers') workersChanged();
     } else if (event.type === 'thinking') {
       state.thinking.set(event.ticket_id, event.project);
       if (visible(event.project)) renderMessages();

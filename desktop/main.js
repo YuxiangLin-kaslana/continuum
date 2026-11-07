@@ -184,6 +184,7 @@ handle('api:tickets', () => client.request('GET', '/api/v1/tickets'));
 handle('api:workers', () => client.request('GET', '/api/v1/workers'));
 handle('api:everything', (after) => client.request('GET', `/api/v1/messages?after=${Number(after) || 0}`));
 handle('api:allSteps', () => client.request('GET', '/api/v1/steps'));
+handle('api:search', (q) => client.request('GET', `/api/v1/search?q=${encodeURIComponent(q)}`));
 handle('api:projects', () => client.request('GET', '/api/v1/projects'));
 handle('api:projectAction', (id, action) =>
   client.request('POST', `/api/v1/projects/${encodeURIComponent(id)}/${encodeURIComponent(action)}`, {}));

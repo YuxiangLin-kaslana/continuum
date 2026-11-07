@@ -116,6 +116,7 @@
     logout: () => { configured = false; return ok(true); },
     everything: (after) => ok(messages.filter((m) => m.id > after).map((m) => ({ ...m }))),
     allSteps: () => ok(steps.map((x) => ({ ...x }))),
+    search: (q) => ok(messages.filter((m) => m.text.includes(q)).reverse().map((m) => ({ ...m }))),
     projects: () => ok(projects.map((p) => ({ ...p }))),
     setTimezone: (timezone) => { window.__fake.timezone = timezone; return ok({ timezone }); },
     projectAction: (id, action) => {

@@ -139,6 +139,14 @@ class AppSource:
                 (user, limit)).fetchall()))
         return [_message(row) for row in rows]
 
+    def search(self, ctx: Any, user: str, query: str, limit: int = 50) -> list[dict[str, Any]]:
+        """The person's messages that contain `query` (as typed, not a pattern), newest first."""
+        pattern = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        rows = self._db(ctx).execute(
+            f"SELECT {', '.join(COLUMNS)} FROM messages WHERE user = ? AND text LIKE ? ESCAPE '\\' "
+            "ORDER BY id DESC LIMIT ?", (user, pattern, limit)).fetchall()
+        return [_message(row) for row in rows]
+
     def say(self, ctx: Any, user: str, thread: str, role: str, text: str, meta: dict[str, Any] | None = None,
             ticket_id: str | None = None) -> dict[str, Any]:
         """Something the assistant says on its own, such as a reminder or a project to confirm: kept and shown."""
