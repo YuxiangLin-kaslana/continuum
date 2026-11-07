@@ -96,14 +96,13 @@
     fire('event', { type: 'ticket', ticket: { id: ticket, stage: 'ended' } });
   };
 
-  // A test can hold a turn at its steps (`hold`), then let it go on one step at a time (`release()`).
-  // A release that comes before the turn reaches its pause is kept, so the turn goes straight on.
-  let held = null;
-  let released = 0;
-  window.__fake = { fire, messages, projects, steps, hold: false, release: () => {
-    if (held) held(); else released++;
-    held = null;
-  } };
+  // A test can hold a turn at its steps (`hold`), then let it go on one step at a time (`release()`). Releases are
+  // counted, and a held pause goes on once there are as many as pauses so far: no order of the two loses one.
+  let passes = 0;
+  let pauses = 0;
+  window.__fake = { fire, messages, projects, steps, hold: false,
+    release: () => { passes++; },
+    gates: () => ({ passes, pauses }) };
   window.continuum = {
     getConfig: () => ok({ server: 'https://continuum.example.com', user: configured ? 'me' : '', configured,
       connection: configured ? 'online' : 'offline' }),
@@ -149,10 +148,10 @@
       const live = (event) => fire('event', { ...event, ticket_id: ticket, thread, project: owner });
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       // Held, the turn stops while the command runs and again while the answer is half written, until released.
-      const pause = () => {
-        if (!window.__fake.hold) return Promise.resolve();
-        if (released) { released--; return Promise.resolve(); }
-        return new Promise((resolve) => { held = resolve; });
+      const pause = async () => {
+        if (!window.__fake.hold) return;
+        const mine = ++pauses;
+        while (passes < mine && window.__fake.hold) await wait(20);
       };
       const ack = () => {
         if (!project) opened(ticket, text.slice(0, 20));

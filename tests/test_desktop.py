@@ -141,7 +141,8 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
                 streaming: document.querySelectorAll('.msg.streaming').length,
                 running: document.querySelectorAll('.work.running').length,
                 last: window.__fake.messages.slice(-3).map((m) => `${m.role}:${m.ticket_id}:${m.text.slice(0, 16)}`),
-                steps: window.__fake.steps.slice(-2).map((s) => `${s.ticket_id}:${s.key}:${s.status}`)})"""))
+                steps: window.__fake.steps.slice(-2).map((s) => `${s.ticket_id}:${s.key}:${s.status}`),
+                gates: window.__fake.gates()})"""))
             raise
         page.wait_for_function("document.querySelector('.msg.streaming').textContent.includes('/work/report.md')")
         if SHOTS:
