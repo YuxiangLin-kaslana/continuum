@@ -215,6 +215,42 @@ app.whenReady().then(() => {
   updateTray();
   globalShortcut.register(SHORTCUT, toggle);
   connect();
+  watchForUpdates();
 });
 
 app.on('will-quit', () => globalShortcut.unregisterAll());
+
+// --- updates: from the GitHub releases, downloaded in the background and installed on the next start -------------
+
+let update = null; // { version, ready }
+
+function watchForUpdates() {
+  // Only an installed app updates itself; a development run (`npm start`) has nothing to replace.
+  if (!app.isPackaged || SMOKE) return;
+  const { autoUpdater } = require('electron-updater');
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('update-available', (info) => {
+    update = { version: info.version, ready: false };
+    send('update', update);
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    update = { version: info.version, ready: true };
+    send('update', update);
+    if (Notification.isSupported()) {
+      new Notification({ title: 'Continuum 有新版本', body: `${info.version} 已下载好，重启后就是新版本。` }).show();
+    }
+  });
+  autoUpdater.on('error', (error) => console.error('update:', error.message));
+  const check = () => autoUpdater.checkForUpdates().catch((error) => console.error('update:', error.message));
+  check();
+  setInterval(check, 4 * 60 * 60 * 1000);
+  ipcMain.on('update:install', () => {
+    if (update && update.ready) {
+      quitting = true;
+      autoUpdater.quitAndInstall(false, true);
+    }
+  });
+}
+
+handle('update:get', () => ({ current: app.getVersion(), update }));

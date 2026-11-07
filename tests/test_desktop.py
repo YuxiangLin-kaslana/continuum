@@ -217,6 +217,16 @@ def test_the_settings_page_adds_tests_and_removes_ssh_servers():
         page.click(".card.host[data-host=andrew] >> text=确认删除？")
         page.wait_for_selector(".card.host[data-host=andrew]", state="detached")
 
+        # The version, and a downloaded update offered with a restart.
+        assert page.inner_text("#version").startswith("当前版本 0.0.6")
+        assert not page.is_visible("#update")
+        page.evaluate("""window.__fake.update = { version: '0.0.7', ready: true };
+                         window.__fake.fire('update', window.__fake.update)""")
+        page.wait_for_selector("#update:not([hidden])")
+        assert "0.0.7 已下载好" in page.inner_text("#update") and "0.0.7 已下载好" in page.inner_text("#version")
+        page.click("#update-install")
+        assert page.evaluate("window.__fake.installed") is True
+
         page.click("#settings")
         assert page.is_visible("#view-chat") and not page.is_visible("#view-settings")
         assert errors == []

@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld('continuum', {
   minimize: () => ipcRenderer.send('window:minimize'),
   hide: () => ipcRenderer.send('window:hide'),
   maximize: () => ipcRenderer.send('window:maximize'),
+  updateInfo: call('update:get'),
+  installUpdate: () => ipcRenderer.send('update:install'),
+  onUpdate: (fn) => ipcRenderer.on('update', (_e, update) => fn(update)),
   onEvent: (fn) => ipcRenderer.on('event', (_e, event) => fn(event)),
   onState: (fn) => ipcRenderer.on('state', (_e, state) => fn(state)),
 });

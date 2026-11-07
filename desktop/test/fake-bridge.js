@@ -1,6 +1,6 @@
 // A stand-in for preload.js, for testing the window in a plain browser: the same calls, backed by memory.
 (function () {
-  const listeners = { event: [], state: [] };
+  const listeners = { event: [], state: [], update: [] };
   const fire = (kind, payload) => listeners[kind].forEach((fn) => fn(payload));
   const now = () => new Date().toISOString();
   let configured = false;
@@ -141,6 +141,9 @@
     minimize: () => {},
     hide: () => {},
     maximize: () => {},
+    updateInfo: () => ok({ current: '0.0.6', update: window.__fake.update || null }),
+    installUpdate: () => { window.__fake.installed = true; },
+    onUpdate: (fn) => listeners.update.push(fn),
     onEvent: (fn) => listeners.event.push(fn),
     onState: (fn) => listeners.state.push(fn),
   };

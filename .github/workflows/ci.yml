@@ -88,7 +88,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: continuum-desktop-windows
-          path: desktop/dist/*.exe
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.blockmap
+            desktop/dist/latest.yml
           if-no-files-found: error
       - name: Publish the release
         # On a v* tag, and on main for a version that has release notes but no release yet, so a release does not
@@ -119,13 +122,17 @@ jobs:
             fi
             version="${tag#v}"
             installer="dist/Continuum-Setup-${version}.exe"
+            # The installed apps look for latest.yml (and the blockmap, for a smaller download) next to the installer.
+            assets=("$installer")
+            for extra in "dist/latest.yml" "$installer.blockmap"; do [ -f "$extra" ] && assets+=("$extra"); done
+            ls -la dist
             notes="../docs/releases/$tag.md"
             # A tag built again (after a failed run) updates its release instead of failing on it.
             if gh release view "$tag" >/dev/null 2>&1; then
-              gh release upload "$tag" "$installer" --clobber
+              gh release upload "$tag" "${assets[@]}" --clobber
               gh release edit "$tag" --title "Continuum ${version}" --notes-file "$notes" --latest
             else
-              gh release create "$tag" "$installer" --target "$GITHUB_SHA" --title "Continuum ${version}" \
+              gh release create "$tag" "${assets[@]}" --target "$GITHUB_SHA" --title "Continuum ${version}" \
                 --notes-file "$notes" --latest
             fi
             gh release view "$tag" --json url,assets --jq '.url, .assets[].name'

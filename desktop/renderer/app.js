@@ -796,6 +796,23 @@
     }
   });
 
+  // --- updates: the main process downloads a new version in the background; a restart installs it ---
+
+  function showUpdate(info) {
+    const update = info && info.update;
+    $('version').textContent = info ? `当前版本 ${info.current}` + (update
+      ? (update.ready ? `，新版本 ${update.version} 已下载好，重启后生效。` : `，正在下载新版本 ${update.version}…`)
+      : '，有新版本时会自动下载。') : '';
+    $('update').hidden = !(update && update.ready);
+    $('update-install').hidden = !(update && update.ready);
+    if (update && update.ready) $('update-text').textContent = `新版本 ${update.version} 已下载好。`;
+  }
+  if (api.updateInfo) {
+    call('updateInfo').then(showUpdate).catch(() => {});
+    api.onUpdate((update) => call('updateInfo').then(showUpdate).catch(() => showUpdate({ current: '', update })));
+    $('update-install').addEventListener('click', () => api.installUpdate());
+  }
+
   // --- live events ---
 
   const lingering = new Map();

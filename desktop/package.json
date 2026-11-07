@@ -1,7 +1,7 @@
 {
   "name": "continuum-desktop",
   "productName": "Continuum",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Continuum（续）桌面端",
   "main": "main.js",
   "private": true,
@@ -11,6 +11,7 @@
     "dist": "electron-builder --win nsis --publish never"
   },
   "dependencies": {
+    "electron-updater": "6.6.2",
     "ws": "8.18.0"
   },
   "devDependencies": {
@@ -39,6 +40,14 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "YuxiangLin-kaslana",
+        "repo": "continuum",
+        "releaseType": "release"
+      }
+    ]
   }
 }
