@@ -189,16 +189,23 @@ CLAUDE_STEPS = {"Bash": "shell", "Read": "read_file", "Write": "write_file", "Ed
                 "LS": "list_files"}
 
 
-def _claude_input(name: str, args: dict[str, Any]) -> str:
+def _claude_input(name: str, args: dict[str, Any], workdir: Path | None = None) -> str:
     for key in ("command", "file_path", "notebook_path", "pattern", "path", "url", "query"):
         if args.get(key):
-            return str(args[key])
+            value = str(args[key])
+            if workdir is not None and key in ("file_path", "notebook_path", "path"):
+                try:
+                    return str(Path(value).resolve().relative_to(workdir.resolve()))
+                except ValueError:
+                    pass
+            return value
     return json.dumps(args, ensure_ascii=False)[:200]
 
 
 class _ClaudeReader:
-    def __init__(self, run: _Run):
+    def __init__(self, run: _Run, workdir: Path | None = None):
         self.run = run
+        self.workdir = workdir
         self.pending = ""  # the text of the latest message, until a tool call shows it was a note
         self.writing = ""  # the text being written now, from the stream's deltas
         self.names: dict[str, str] = {}
@@ -232,7 +239,7 @@ class _ClaudeReader:
                     key = str(block.get("id") or uuid.uuid4().hex)
                     self.names[key] = name
                     args = block.get("input") or {}
-                    run.step(key, CLAUDE_STEPS.get(name, name.lower()), _claude_input(name, args), "running")
+                    run.step(key, CLAUDE_STEPS.get(name, name.lower()), _claude_input(name, args, self.workdir), "running")
         elif kind == "user":
             for block in (event.get("message") or {}).get("content") or []:
                 if isinstance(block, dict) and block.get("type") == "tool_result":
@@ -535,7 +542,7 @@ class ClaudeCodeExecutor(_CliAgentExecutor):
         return argv + config.extra_args
 
     def reader(self, run: _Run, job: Any) -> Any:
-        return _ClaudeReader(run)
+        return _ClaudeReader(run, job.workdir)
 
     def unsafe(self, stderr_line: str) -> bool:
         return "Sandbox disabled" in stderr_line or "Commands will run WITHOUT sandboxing" in stderr_line
