@@ -435,7 +435,12 @@
     } else {
       bubble.textContent = m.text;
     }
-    item.append(face, bubble, el('div', 'meta', time(m.at)));
+    const meta = el('div', 'meta', time(m.at));
+    // A message the dispatcher handed to a project already under way says which.
+    if (mine && m.meta && m.meta.project && !(m.thread || '').startsWith('p-') && timelineBox()?.box === $('messages')) {
+      meta.append(el('span', 'handed', ` · 交给项目「${m.meta.project_name || '项目'}」`));
+    }
+    item.append(face, bubble, meta);
     return arrival(item, `m:${m.id}`);
   }
 
@@ -580,26 +585,54 @@
     return out;
   }
 
-  function workBox(ticket, steps, thinking) {
+  // Where a run of work stands, in a few words: what it waits for, what it is doing, or what it did.
+  function workState(steps, thinking) {
     const asking = steps.some((s) => s.status === 'approval');
     const running = thinking || asking || steps.some((s) => s.status === 'running');
+    const counted = steps.filter((s) => s.name !== 'note' && s.name !== 'think').length;
+    const current = [...steps].reverse().find((s) => s.status === 'running');
+    const busy = { claude_code: 'Claude Code 正在处理…', codex: 'Codex 正在处理…' };
+    const dispatching = steps.find((s) => s.name === 'dispatch' && s.status === 'running');
+    let label;
+    if (asking) label = '等你批准一条远程命令';
+    else if (dispatching) label = `${(dispatching.output || '').split('\n').filter(Boolean).length} 个 Worker 正在同时干活…`;
+    else if (current) label = busy[current.name] || `正在${STEP_NAMES[current.name] || '处理'}…`;
+    else if (thinking) label = '思考中…';
+    else label = counted ? `已执行 ${counted} 个步骤` : '已思考';
+    return { asking, running, current, label };
+  }
+
+  // In the main conversation a project's work is one line: the dispatcher handed it to a project, which does it and
+  // comes back with the result. Its steps are on the project's page; a command waiting for the person shows here.
+  function projectLine(ticket, steps, thinking) {
+    const { asking, running, label } = workState(steps, thinking);
+    const project = (steps.find((s) => s.project) || {}).project || ticket;
+    const item = el('li', `work compact${running ? ' running' : ''}`);
+    item.dataset.ticket = ticket;
+    const line = el('div', 'work-line');
+    const known = projectById(project);
+    line.append(el('span', running ? 'work-spin' : 'work-done'), el('span', 'work-project', known ? known.name : '项目'),
+      el('span', 'work-label', label));
+    const open = el('button', 'outline small', '查看过程');
+    open.addEventListener('click', () => openProject(project));
+    line.append(open);
+    item.append(line);
+    if (asking) {
+      const list = el('ol', 'work-steps waiting');
+      list.append(...steps.filter((s) => s.status === 'approval').map(stepItem));
+      item.append(list);
+    }
+    return arrival(item, `w:${ticket}`);
+  }
+
+  function workBox(ticket, steps, thinking) {
+    const { asking, running, current, label } = workState(steps, thinking);
     const item = el('li', `work${running ? ' running' : ''}`);
     item.dataset.ticket = ticket;
     const details = remember(el('details', 'work-box'), `w:${ticket}`, running);
     if (running) details.open = state.open.get(`w:${ticket}`) !== false;
     if (asking) details.open = true;
     const summary = el('summary');
-    const counted = steps.filter((s) => s.name !== 'note' && s.name !== 'think').length;
-    const current = [...steps].reverse().find((s) => s.status === 'running');
-    let label;
-    const busy = { claude_code: 'Claude Code 正在处理…', codex: 'Codex 正在处理…' };
-    const dispatching = steps.find((s) => s.name === 'dispatch' && s.status === 'running');
-    if (dispatching) busy.dispatch = `${(dispatching.output || '').split('\n').filter(Boolean).length} 个 Worker 正在同时干活…`;
-    if (asking) label = '等你批准一条远程命令';
-    else if (dispatching) label = busy.dispatch;
-    else if (current) label = busy[current.name] || `正在${STEP_NAMES[current.name] || '处理'}…`;
-    else if (thinking) label = '思考中…';
-    else label = counted ? `已执行 ${counted} 个步骤` : '已思考';
     summary.append(el('span', running ? 'work-spin' : 'work-done'), el('span', 'work-label', label), icon('chevron'));
     details.append(summary);
     const list = el('ol', 'work-steps');
@@ -646,7 +679,8 @@
     let run = null;
     const flush = () => {
       if (!run) return;
-      nodes.push(workBox(run.ticket, run.steps, thinkingHere.has(run.ticket) && run.last));
+      const draw = box === $('messages') ? projectLine : workBox;
+      nodes.push(draw(run.ticket, run.steps, thinkingHere.has(run.ticket) && run.last));
       run = null;
     };
     timeline.forEach((entry, index) => {
@@ -666,7 +700,7 @@
     // A ticket thinking with no step of its own after its last message yet gets a box of its own at the end.
     for (const ticket of thinkingHere) {
       if (!nodes.some((n) => n.classList.contains('running') && n.dataset.ticket === ticket)) {
-        nodes.push(workBox(ticket, [], true));
+        nodes.push((box === $('messages') ? projectLine : workBox)(ticket, [], true));
       }
     }
     for (const [ticket, live] of state.streams) {

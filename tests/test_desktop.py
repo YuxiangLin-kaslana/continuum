@@ -93,10 +93,16 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         # Avatars are drawn from the names: the person's and the assistant's.
         assert page.locator(".msg.user .avatar svg").count() == 3 and page.locator(".msg.acknowledgement .avatar svg").count() == 1
         assert page.locator("#me-avatar svg").count() == 1
-        # The steps a worker took are kept in the conversation, folded into one line.
-        assert "已执行 2 个步骤" in page.locator(".work").first.inner_text()
-        page.locator(".work summary").first.click()
-        assert "python3 compare.py quotes/" in page.locator(".work .step.shell").first.inner_text()
+        # In the main conversation a project's work is one line; its steps are on the project's page.
+        line = page.locator("#messages .work.compact").first
+        assert "核对 Laser" in line.inner_text() and "已执行 2 个步骤" in line.inner_text()
+        assert page.locator("#messages .step").count() == 0
+        line.get_by_role("button", name="查看过程").click()
+        page.wait_for_selector("#project-detail:not([hidden])")
+        page.locator("#project-messages .work summary").first.click()
+        assert "python3 compare.py quotes/" in page.locator("#project-messages .work .step.shell").first.inner_text()
+        page.click("#project-back")
+        page.click("#tab-chat")
 
         # A reminder from a project arrives in the one conversation.
         assert "记得看巡检结果" in page.inner_text(".msg.reminder")
@@ -128,10 +134,8 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         page.evaluate("window.__fake.hold = true")
         page.fill("#input", "顺便核一下交期")
         page.press("#input", "Enter")
-        page.wait_for_selector(".work.running .step.shell.running >> text=ls /work")
-        assert "正在运行命令" in page.inner_text(".work.running summary")
+        page.wait_for_selector("#messages .work.compact.running >> text=正在运行命令…")
         page.evaluate("window.__fake.release()")
-        page.wait_for_selector(".work .step.shell.done >> text=ls /work")
         try:
             page.wait_for_selector(".msg.streaming")
         except Exception:
@@ -338,13 +342,16 @@ def test_nothing_in_a_conversation_scrolls_sideways_and_markdown_renders(width):
         page.wait_for_selector("#main:not([hidden])")
         # The one conversation holds a reply made to be too wide.
         page.wait_for_selector(".msg.reply.rich table")
-        # Open every step, the widest the conversation gets (this test is about layout, not about clicking).
-        page.evaluate("document.querySelectorAll('#messages details').forEach((d) => { d.open = true; })")
+        # The project made to be too wide, on its page with every step open (this test is about layout, not clicking).
+        page.click("#tab-projects")
+        page.locator(".card.project[data-project=t-9]").get_by_role("button", name="打开").click()
+        page.wait_for_selector("#project-messages .msg.reply.rich table")
+        page.evaluate("document.querySelectorAll('#project-messages details').forEach((d) => { d.open = true; })")
         page.wait_for_selector(".step-command")
         assert page.locator(".step-command").count() == 2
 
         # Markdown: what it reads, and what it leaves as text.
-        reply = page.locator(".msg.reply", has_text="我这边看不到任何外部服务器").locator(".bubble")
+        reply = page.locator("#project-messages .msg.reply", has_text="我这边看不到任何外部服务器").locator(".bubble")
         assert reply.locator("h4").inner_text() == "结果" and reply.locator("strong").count() == 1
         assert reply.locator("em").inner_text() == "AWS EC2"
         assert reply.locator("a").count() == 2 and reply.locator("a").nth(1).get_attribute("target") == "_blank"
@@ -355,11 +362,11 @@ def test_nothing_in_a_conversation_scrolls_sideways_and_markdown_renders(width):
         # Nothing is wider than the room it has: no sideways scrolling anywhere.
         wide = page.evaluate("""() => {
             const bad = [];
-            for (const box of [document.scrollingElement, document.querySelector('#messages')]) {
+            for (const box of [document.scrollingElement, document.querySelector('#view-projects')]) {
                 if (box.scrollWidth > box.clientWidth + 1) bad.push(`${box.id || box.tagName} ${box.scrollWidth}>${box.clientWidth}`);
             }
-            const right = document.querySelector('#messages').getBoundingClientRect().right;
-            for (const node of document.querySelectorAll('#messages *')) {
+            const right = document.querySelector('#view-projects').getBoundingClientRect().right;
+            for (const node of document.querySelectorAll('#project-messages *')) {
                 const r = node.getBoundingClientRect();
                 if (r.width && r.right > right + 1) bad.push(`${node.tagName}.${node.className} ${Math.round(r.right)}>${Math.round(right)}`);
                 if (node.scrollWidth > node.clientWidth + 1 && getComputedStyle(node).overflowX !== 'hidden'
@@ -394,13 +401,12 @@ def test_a_command_on_a_server_waits_in_the_conversation_for_the_persons_approva
         page.press("#input", "Enter")
         card = page.locator(".approval-box")
         card.wait_for()
-        assert "等你批准一条远程命令" in page.inner_text(".work.running summary")
+        assert "等你批准一条远程命令" in page.inner_text("#messages .work.compact.running .work-label")
         assert "服务器 web" in card.inner_text() and "systemctl restart nginx" in card.inner_text()
         assert "理由：nginx 没在跑" in card.inner_text()
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-approval.png")
         card.get_by_role("button", name="批准执行").click()
-        page.wait_for_selector(".step.ssh.done")
         page.wait_for_selector(".msg.reply >> text=已重启 nginx。")
         assert page.locator(".approval-box").count() == 0 and page.locator(".work.running").count() == 0
 
@@ -408,7 +414,7 @@ def test_a_command_on_a_server_waits_in_the_conversation_for_the_persons_approva
         page.press("#input", "Enter")
         page.locator(".approval-box").get_by_role("button", name="拒绝").click()
         page.wait_for_selector(".msg.reply >> text=你拒绝了，没有重启。")
-        assert "人拒绝了这条命令" in page.locator(".step.ssh.error").last.text_content()
+        assert page.evaluate("window.__fake.steps.filter(s => s.name === 'ssh').map(s => s.status)") == ["done", "error"]
         assert errors == []
         browser.close()
 
@@ -466,11 +472,16 @@ def test_the_workers_page_counts_what_runs_and_what_ran():
             step('d1', 'shell', 'python3 leadtimes.py a', 'running', '1·供应商甲');
             step('d22', 'shell', 'python3 leadtimes.py b', 'done', '2·供应商乙');
         }""")
-        page.wait_for_selector(".work.running summary >> text=2 个 Worker 正在同时干活…")
-        assert page.locator(".work.running .step-worker").all_inner_texts() == ["1·供应商甲", "2·供应商乙"]
-        assert "派出 Worker" in page.inner_text(".work.running .step.dispatch")
+        page.wait_for_selector("#messages .work.compact.running >> text=2 个 Worker 正在同时干活…")
+        assert page.locator("#messages .step-worker").count() == 0
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-compact.png")
+        page.locator("#messages .work.compact.running").get_by_role("button", name="查看过程").click()
+        page.wait_for_selector("#project-messages .work.running .step-worker")
+        assert page.locator("#project-messages .work.running .step-worker").all_inner_texts() == ["1·供应商甲", "2·供应商乙"]
+        assert "派出 Worker" in page.inner_text("#project-messages .work.running .step.dispatch")
         # Thinking twice in a row reads as one thought.
-        assert page.locator(".work.running .step.think").all_inner_texts() == ["思考了 5 秒"]
+        assert page.locator("#project-messages .work.running .step.think").all_inner_texts() == ["思考了 5 秒"]
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-dispatch.png")
         page.click("#tab-projects")  # the project opened from the workers page is still open there
