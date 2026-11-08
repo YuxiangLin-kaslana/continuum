@@ -266,6 +266,13 @@ def test_the_settings_page_adds_tests_and_removes_ssh_servers():
         page.click(".card.host[data-host=andrew] >> text=测试连接")
         page.wait_for_selector(".card.host.ok[data-host=andrew]")
         assert "经过跳板" in page.inner_text(".card.host[data-host=andrew]")
+        # Looking a reached server over: what runs there and what is being built.
+        assert "还没有巡检过" in page.inner_text(".card.host[data-host=andrew]")
+        page.locator(".card.host[data-host=andrew]").get_by_role("button", name="巡检").click()
+        page.wait_for_selector(".card.host[data-host=andrew] .profile")
+        page.click(".card.host[data-host=andrew] .profile summary")
+        assert "feature/mrp" in page.inner_text(".card.host[data-host=andrew] .profile-text")
+        assert page.locator(".card.host[data-host=andrew]").get_by_role("button", name="重新巡检").count() == 1
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-settings.png", full_page=True)
 
@@ -453,6 +460,8 @@ def test_the_workers_page_counts_what_runs_and_what_ran():
                 id: 900 + key.length, user: 'me', thread: 'main', ticket_id: 't-2', project: 't-2', key, name, input,
                 status, output: status === 'running' ? '1. 供应商甲\\n2. 供应商乙' : '', worker,
                 at: new Date(Date.now() + 3600e3).toISOString() } });
+            step('t', 'think', '2', 'done');
+            step('tt', 'think', '3', 'done');
             step('d', 'dispatch', '派出 2 个 Worker：供应商甲、供应商乙', 'running');
             step('d1', 'shell', 'python3 leadtimes.py a', 'running', '1·供应商甲');
             step('d22', 'shell', 'python3 leadtimes.py b', 'done', '2·供应商乙');
@@ -460,6 +469,8 @@ def test_the_workers_page_counts_what_runs_and_what_ran():
         page.wait_for_selector(".work.running summary >> text=2 个 Worker 正在同时干活…")
         assert page.locator(".work.running .step-worker").all_inner_texts() == ["1·供应商甲", "2·供应商乙"]
         assert "派出 Worker" in page.inner_text(".work.running .step.dispatch")
+        # Thinking twice in a row reads as one thought.
+        assert page.locator(".work.running .step.think").all_inner_texts() == ["思考了 5 秒"]
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-dispatch.png")
         page.click("#tab-projects")  # the project opened from the workers page is still open there

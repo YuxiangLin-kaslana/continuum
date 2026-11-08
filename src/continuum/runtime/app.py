@@ -31,7 +31,7 @@ from continuum.policy.gate import RulePolicy
 from .accounts import Accounts
 from .crew import Crew
 from .projects import Projects, project_of_thread, zone
-from .ssh import SshHosts
+from .ssh import SshHosts, survey
 from .effects import Effects
 from .executor import InProcessExecutor
 from .outbox import StoreOutbox
@@ -86,6 +86,8 @@ class Runtime:
             self.ssh = SshHosts(self.store, self.home, self.settings.ssh)
             self.projects = Projects(self.store, self.home)
             self._clock_at = 0.0
+            self._profiles_at = 0.0
+            self._surveying: set[str] = set()
             self._wake = asyncio.Event()
             self.effects = Effects(self.store, on_enqueue=self.poke)
             self.sources = self._sources()
@@ -297,6 +299,42 @@ class Runtime:
             self._problem(f"evaluate: {type(error).__name__}: {error}")
         await self.effects.run_due(wait=False)
         self._tick_projects()
+        self._tick_profiles()
+
+    # --- what runs on each server ---
+
+    def survey_soon(self, name: str) -> None:
+        """Look over a server in the background (once at a time per server)."""
+        if name in self._surveying:
+            return
+        self._surveying.add(name)
+
+        async def work() -> None:
+            try:
+                model = self.models.get(str(self.settings.router.config.get("model", "default")))
+                await survey(self.ssh, name, model)
+                log.info("ssh: surveyed %s", name)
+            except Exception:  # noqa: BLE001 - a server that cannot be surveyed now is tried again later
+                log.exception("ssh: surveying %s failed", name)
+            finally:
+                self._surveying.discard(name)
+
+        task = asyncio.create_task(work(), name=f"survey-{name}")
+        self._tasks.append(task)
+        task.add_done_callback(lambda t: self._tasks.remove(t) if t in self._tasks else None)
+
+    def _tick_profiles(self) -> None:
+        """Once an hour, look again at reachable servers whose profile is more than a day old (a few at a time)."""
+        now = time.monotonic()
+        if now - self._profiles_at < 3600:
+            return
+        self._profiles_at = now
+        stale = datetime.now(UTC) - timedelta(days=1)
+        due = [h["name"] for h in self.ssh.list() if (h.get("state") or {}).get("ok")
+               and datetime.fromisoformat((h.get("profile") or {}).get("updated_at") or "2000-01-01T00:00:00+00:00")
+               < stale]
+        for name in due[:4]:
+            self.survey_soon(name)
 
     # --- projects ---
 

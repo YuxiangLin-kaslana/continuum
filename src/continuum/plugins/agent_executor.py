@@ -85,6 +85,8 @@ DELEGATE_TOOLS = {
 # them ([ssh] admins) and there are any.
 SSH_TOOLS = [
     tool("ssh_hosts", "列出你可以连的服务器：名字、地址、登录用户、执行权限、上次测试是否连通。", {}, required=[]),
+    tool("ssh_profile", "读一台服务器的概况：上面运行的服务、在开发的项目和最近在做的功能（定期巡检得来的）。"
+         "去一台机器干活前先看它。", {"host": {"type": "string"}}),
     tool("ssh", "在一台登记过的服务器上执行一条 shell 命令，由 Continuum 代为执行，返回退出码和输出。"
          "按这台服务器的执行权限，命令可能直接执行，也可能要等人批准（人可能拒绝）。"
          "reason 用一句话告诉人为什么要执行它。",
@@ -93,7 +95,7 @@ SSH_TOOLS = [
 ]
 SSH_RULES = """
 你还能用 ssh_hosts / ssh 在人登记过的服务器上执行命令（它们不在你的沙箱里，由 Continuum 代为连接）。
-先用 ssh_hosts 看清单。尽量用只读命令；会改东西的命令（重启、改文件、装包、删除）只在请求需要时用，reason 写清楚，
+先用 ssh_hosts 看清单；去一台机器干活前用 ssh_profile 看它上面跑着什么、在开发什么。尽量用只读命令；会改东西的命令（重启、改文件、装包、删除）只在请求需要时用，reason 写清楚，
 人批准后才会执行；被拒绝就不要换个写法再试，向人说明。不要读取或输出私钥、密码等机密。
 """
 # A long-running project: offered when the host keeps projects. The person confirms it before it does anything.
@@ -535,6 +537,16 @@ class AgentExecutor:
                     return f"错误：{error}", False
                 when = "；".join(s.describe(project.timezone) for s in project.schedules) or "没有定时安排"
                 return f"已提议项目「{project.name}」（{when}），等人在对话里确认后生效。", False
+            if name == "ssh_profile":
+                ssh = getattr(job, "ssh", None)
+                host = ssh.get(str(args.get("host", ""))) if ssh else None
+                if host is None:
+                    return "错误：没有这台服务器；用 ssh_hosts 看清单", False
+                profile = host.get("profile") or {}
+                if not profile.get("text") and not profile.get("raw"):
+                    return f"{host['name']} 还没有巡检过（{profile.get('error') or '没有概况'}）；需要的话用 ssh 自己看。", False
+                return (f"{host['name']} 的概况（{profile.get('updated_at', '')[:16]} 巡检）：\n{profile.get('text') or ''}"
+                        f"\n\n巡检原始输出（节选）：\n{(profile.get('raw') or '')[-6000:]}"), False
             if name == "ssh_hosts":
                 ssh = getattr(job, "ssh", None)
                 if ssh is None:
@@ -545,8 +557,11 @@ class AgentExecutor:
                     tested = {True: "上次测试连通", False: f"上次测试连不上（{state.get('message', '')[:40]}）"}.get(
                         state.get("ok"), "还没测试")
                     via = f"，经过 {h['jump']}" if h.get("jump") else ""
+                    profile = (h.get("profile") or {}).get("text") or ""
+                    about = next((line.strip(" -#*1.") for line in profile.splitlines() if line.strip()), "")
                     rows.append(f"- {h['name']}：{h['user']}@{h['address']}:{h['port']}{via}；"
-                                f"执行权限：{ssh_rules.APPROVALS.get(h.get('approval', 'ask'))}；{tested}")
+                                f"执行权限：{ssh_rules.APPROVALS.get(h.get('approval', 'ask'))}；{tested}"
+                                + (f"；概况：{about[:80]}" if about else ""))
                 return "\n".join(rows) or "（没有登记的服务器）", False
             if name == "ack":
                 job.ack(str(args["trigger_id"]), str(args["text"]))

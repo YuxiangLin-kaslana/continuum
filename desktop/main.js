@@ -196,6 +196,7 @@ handle('api:sshSave', (name, host) =>
   client.request('PUT', `/api/v1/ssh/hosts/${encodeURIComponent(name)}`, host));
 handle('api:sshDelete', (name) => client.request('DELETE', `/api/v1/ssh/hosts/${encodeURIComponent(name)}`));
 handle('api:sshTest', (name) => client.request('POST', `/api/v1/ssh/hosts/${encodeURIComponent(name)}/test`));
+handle('api:sshProfile', (name) => client.request('POST', `/api/v1/ssh/hosts/${encodeURIComponent(name)}/profile`));
 handle('api:stop', (id) => client.request('POST', `/api/v1/tickets/${encodeURIComponent(id)}/stop`, {}));
 handle('api:retry', (id) => client.request('POST', `/api/v1/tickets/${encodeURIComponent(id)}/retry`));
 

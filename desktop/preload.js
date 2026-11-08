@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('continuum', {
   sshSave: call('api:sshSave'),
   sshDelete: call('api:sshDelete'),
   sshTest: call('api:sshTest'),
+  sshProfile: call('api:sshProfile'),
   stop: call('api:stop'),
   retry: call('api:retry'),
   minimize: () => ipcRenderer.send('window:minimize'),

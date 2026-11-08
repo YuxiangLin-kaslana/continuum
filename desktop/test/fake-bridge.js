@@ -260,6 +260,11 @@
       sshHosts.sort((a, b) => a.name.localeCompare(b.name));
       return ok({ ...row });
     },
+    sshProfile: (name) => new Promise((resolve) => setTimeout(() => {
+      const h = sshHosts.find((x) => x.name === name);
+      h.profile = { ok: true, updated_at: now(), text: `${name} 是 ERP 的生产机。\n- 服务：nginx（443）、erp-api\n- 项目：/home/u/erp，分支 feature/mrp，在做 MRP` };
+      resolve({ ok: true, data: { ...h } });
+    }, 100)),
     sshDelete: (name) => {
       if (sshHosts.some((h) => h.jump === name)) return Promise.resolve({ ok: false, status: 409, error: `${sshHosts.filter((h) => h.jump === name).map((h) => h.name).join(', ')} 还经过它跳转，先改掉它们` });
       sshHosts.splice(sshHosts.findIndex((h) => h.name === name), 1);

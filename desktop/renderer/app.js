@@ -565,6 +565,21 @@
     return item;
   }
 
+  // Thinking twice in a row (with only the worker's own calls, which are not shown, in between) is one thought.
+  function mergeThinking(steps) {
+    const out = [];
+    for (const step of steps) {
+      const last = out[out.length - 1];
+      if (step.name === 'think' && last && last.name === 'think' && (last.worker || '') === (step.worker || '')) {
+        out[out.length - 1] = { ...last, input: String((Number(last.input) || 0) + (Number(step.input) || 0)),
+          output: [last.output, step.output].filter(Boolean).join('\n\n') };
+      } else {
+        out.push(step);
+      }
+    }
+    return out;
+  }
+
   function workBox(ticket, steps, thinking) {
     const asking = steps.some((s) => s.status === 'approval');
     const running = thinking || asking || steps.some((s) => s.status === 'running');
@@ -588,7 +603,7 @@
     summary.append(el('span', running ? 'work-spin' : 'work-done'), el('span', 'work-label', label), icon('chevron'));
     details.append(summary);
     const list = el('ol', 'work-steps');
-    list.append(...steps.map(stepItem));
+    list.append(...mergeThinking(steps).map(stepItem));
     // Waiting for the person is not thinking.
     if (thinking && !current && !asking) list.append(el('li', 'step thinking', '思考中…'));
     details.append(list);
@@ -1111,6 +1126,16 @@
     row('主机指纹', st.fingerprint);
     row('备注', h.note);
     box.append(detail);
+    // What runs there and what is being built, from the last look over it.
+    const profile = h.profile || {};
+    if (profile.text || profile.error) {
+      const about = el('details', 'profile');
+      const head = el('summary', '', `服务器概况 · ${day(profile.updated_at)} ${time(profile.updated_at)}`);
+      about.append(head, el('div', profile.ok ? 'profile-text' : 'profile-text error', profile.text || profile.error));
+      box.append(about);
+    } else if (st.ok) {
+      box.append(el('p', 'hint', '还没有巡检过：点“巡检”看看上面跑着什么、在开发什么。'));
+    }
     const foot = el('div', 'card-foot');
     if (st.tested_at) {
       const when = el('span', 'meta-item');
@@ -1132,6 +1157,20 @@
         test.textContent = '测试连接';
       }
     });
+    const look = el('button', 'outline', profile.text ? '重新巡检' : '巡检');
+    look.addEventListener('click', async () => {
+      look.disabled = true;
+      look.textContent = '巡检中…';
+      try {
+        const surveyed = await call('sshProfile', h.name);
+        ssh.hosts = ssh.hosts.map((x) => (x.name === h.name ? surveyed : x));
+        renderSsh();
+      } catch (error) {
+        showStatus(error.message);
+        look.disabled = false;
+        look.textContent = '巡检';
+      }
+    });
     const edit = el('button', 'outline', '编辑');
     edit.addEventListener('click', () => openForm(h));
     const remove = el('button', 'outline danger', '删除');
@@ -1150,7 +1189,7 @@
         showStatus(error.message);
       }
     });
-    actions.append(test, edit, remove);
+    actions.append(test, look, edit, remove);
     foot.append(actions);
     box.append(foot);
     return box;

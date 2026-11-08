@@ -12,6 +12,10 @@ FAKE_SSH = r'''
 import sys
 args = sys.argv[1:]
 host = args[args.index("-F") + 2]
+if "== services" in args[-1]:
+    print("== host\nweb-box\nUbuntu 24.04\n== services\nnginx.service\nerp-api.service\n== listening\n0.0.0.0:443 nginx")
+    print("== repos\n-- /home/u/erp  [feature/mrp]\n2026-11-07 MRP: 物料需求计算\n   (3 uncommitted changes)")
+    sys.exit(0)
 if host == "continuum-down":
     print("ssh: connect to host 10.128.0.20 port 22: Connection timed out")
     sys.exit(255)
@@ -215,3 +219,52 @@ async def _until(predicate, timeout=10.0):
     while not predicate():
         assert loop.time() < end, "timed out"
         await asyncio.sleep(0.02)
+
+
+
+class Summarizer:
+    def __init__(self):
+        self.asked = []
+
+    async def complete(self, messages, tools=None, tool_choice=None, **extra):
+        self.asked.append(messages[-1]["content"])
+        return {"role": "assistant", "content": "ERP 的生产机。\n- 服务：nginx（443）、erp-api\n- 项目：/home/u/erp，分支 feature/mrp，在做 MRP"}
+
+    async def close(self):
+        pass
+
+
+def test_a_server_reached_is_looked_over_and_its_profile_kept(tmp_path):
+    async def main():
+        rt = ssh_runtime(tmp_path)
+        summarizer = Summarizer()
+        rt.models["default"] = summarizer
+        me = {"Authorization": f"Bearer {rt.accounts.add('me')}"}
+        port, runner = await serve(rt)
+        try:
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as c:
+                await c.put("/api/v1/ssh/hosts/web", headers=me, json={"address": "34.1.2.3", "user": "u"})
+                await c.put("/api/v1/ssh/hosts/down", headers=me, json={"address": "10.128.0.20", "user": "u"})
+                # Reached: looked over in the background, once.
+                assert (await c.post("/api/v1/ssh/hosts/web/test", headers=me)).json()["state"]["ok"]
+                await _until(lambda: (rt.ssh.get("web").get("profile") or {}).get("text"))
+                profile = rt.ssh.get("web")["profile"]
+                assert profile["ok"] and profile["text"].startswith("ERP 的生产机。")
+                assert "feature/mrp" in profile["raw"] and "erp-api.service" in summarizer.asked[0]
+                # Not reached: nothing to look at.
+                assert not (await c.post("/api/v1/ssh/hosts/down/test", headers=me)).json()["state"]["ok"]
+                await asyncio.sleep(0.2)
+                assert "profile" not in rt.ssh.get("down")
+                # On request, and kept through an edit that does not move the host.
+                again = (await c.post("/api/v1/ssh/hosts/web/profile", headers=me)).json()
+                assert again["profile"]["ok"] and len(summarizer.asked) == 2
+                await c.put("/api/v1/ssh/hosts/web", headers=me, json={"address": "34.1.2.3", "user": "u", "note": "x"})
+                assert rt.ssh.get("web")["profile"]["text"].startswith("ERP")
+                moved = (await c.put("/api/v1/ssh/hosts/web", headers=me,
+                                     json={"address": "34.9.9.9", "user": "u"})).json()
+                assert "profile" not in moved
+        finally:
+            runner.cancel()
+            await rt.close()
+
+    asyncio.run(main())

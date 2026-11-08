@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -20,7 +21,7 @@ from continuum.core.model import ActorRef, Ticket
 from continuum.core.stage import can_retry, ticket_stage
 
 from .projects import project_of_thread
-from .ssh import APPROVALS, Host
+from .ssh import APPROVALS, Host, survey
 
 if TYPE_CHECKING:
     from .app import Runtime
@@ -407,9 +408,23 @@ def create_app(rt: Runtime) -> FastAPI:
     async def ssh_test(name: str, user: str = Depends(user_of)) -> dict[str, Any]:
         ssh_admin(user)
         try:
-            return ssh_view(await rt.ssh.test(name))
+            tested = await rt.ssh.test(name)
         except KeyError:
             raise HTTPException(404, "没有这台服务器") from None
+        # A server just reached is looked over (what runs there, what is being built), unless that was lately done.
+        profiled = (tested.get("profile") or {}).get("updated_at")
+        if tested["state"].get("ok") and (not profiled or datetime.fromisoformat(profiled)
+                                          < datetime.now(UTC) - timedelta(hours=12)):
+            rt.survey_soon(name)
+        return ssh_view(tested)
+
+    @app.post("/api/v1/ssh/hosts/{name}/profile")
+    async def ssh_profile(name: str, user: str = Depends(user_of)) -> dict[str, Any]:
+        ssh_admin(user)
+        if rt.ssh.get(name) is None:
+            raise HTTPException(404, "没有这台服务器")
+        model = rt.models.get(str(rt.settings.router.config.get("model", "default")))
+        return ssh_view(await survey(rt.ssh, name, model))
 
     @app.post("/api/v1/approvals/{ticket_id}/{key}")
     async def approve(ticket_id: str, key: str, body: ApprovalRequest, user: str = Depends(user_of)) \
