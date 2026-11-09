@@ -150,7 +150,7 @@ def test_a_message_reaches_no_earlier_work_by_itself_and_goes_where_the_router_s
             if "解释 LLM" in line), reason="是 LLM 那件事的后续"))
     worker = StreamingModel(
         call("report", state="ready", summary="LLM 是大语言模型。"),
-        call("report", state="ready", summary="0402、0603、0805。"),
+        call("report", state="ready", summary="0402、0603、0805。" + "细节" * 500 + "要我接着列 01005 吗？"),
         call("report", state="ready", summary="好的，会提醒。"),
         lambda messages: call("report", state="ready",
                               summary=f"补充：{'再说说 LLM 的上下文长度' in messages[-1]['content']}"))
@@ -175,6 +175,8 @@ def test_a_message_reaches_no_earlier_work_by_itself_and_goes_where_the_router_s
                     assert [i.kind for i in ticket.inputs if i.kind in ("trigger", "resumed")] == []
                 llm = next(t for t in tickets if t.title == "解释 LLM")
                 assert f"id={llm.id} 解释 LLM（一次性，已结束）" in seen_cards[2]
+                # Seen live: a long answer cut short lost the question at its end, so "修一下" read as nothing.
+                assert "要我接着列 01005 吗？" in seen_cards[2]
 
                 posted = (await c.post("/api/v1/threads/main/messages", headers=me,
                                        json={"text": "再说说 LLM 的上下文长度"})).json()

@@ -568,7 +568,11 @@ class ProjectDesk:
             project = meta.get("project") or project_of_thread(m.get("thread")) or by_ticket.get(m.get("ticket_id") or "")
             who = {"user": "人", "reply": "助理", "acknowledgement": "助理"}.get(m["role"], m["role"])
             text = " ".join(m["text"].split())
-            out.append({"project": project, "who": who, "text": text if len(text) <= 120 else text[:120] + "…"})
+            # The start says what it is about and the end what it asks ("要我接着修吗？"); the latest is kept whole.
+            keep = 1500 if m is rows[-1] else 300
+            if len(text) > keep:
+                text = text[:keep // 3] + " …… " + text[-(keep - keep // 3):]
+            out.append({"project": project, "who": who, "text": text})
         return out
 
     def forward(self, trigger: Any, project_id: str) -> str | None:

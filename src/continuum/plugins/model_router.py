@@ -29,7 +29,9 @@ ROUTER = """你是 Continuum 的路由器。你只决定一条请求要不要变
 
 对每个候选，调用一次 decide：
 - accept：对方要你做一件事，或者问一个需要你去查、去算、去回答的问题——私聊里发给你的消息几乎都属于这类。
-  title 是十几个字的工单名；scope 用对方的原话概括要做什么，不要扩写；
+  title 是十几个字的工单名；scope 是交给项目的任务：用对方的原话概括要做什么，不要扩写需求，但要自足——
+  接手的项目看不到你们的对话，所以“这个”“修一下”“继续”这类指代，要按最近的对话写明指的是什么
+  （比如“修一下”→“修 deploy 机器上连不上 Postgres、反复重启的 hatchet-engine、prod-worker、ai-chat、logstash”）；
   acknowledgement 是回给对方的一句话，用他的语言：你是分配器，不亲自干活，说清你开了一个项目去做什么、做完会告诉他
   （比如“好，我开一个项目去核对 MRP 的进展，做完告诉你。”）；name 是 2-4 个英文单词的短名（小写、连字符）。
 - ignore：只有纯客套（谢谢、好的、收到、早上好）、对已有工单的重复请求（已有工单列在下面），或者明显不是对你说的话。
@@ -41,6 +43,7 @@ FORWARDING = """
 它会交给那个项目去处理（它记得之前做过什么）；不要为同一件事再开一个。
 结合最近的对话判断：“刚才那个”“这个结果”“再……”“接着”“改成……”这类指代刚说过的内容的，指的是最近的对话里
 最后在说的那件事（看最后几条属于哪个项目），以对话的先后为准，不看项目名字和这条消息的字面像不像。
+助理上一条在问他（“要我接着修吗？”“要不要……”）时，“修一下”“好”“可以”“做吧”就是在回答它：forward 给那个项目。
 和这些项目都无关的新事才 accept。
 """
 
@@ -117,7 +120,7 @@ class ModelRouter:
         if candidate.strength != "explicit":
             return await self._assess_inferred(ctx, candidate, model, config)
         projects = self._continuable(ctx, candidate)
-        recent = self._recent(ctx, candidate) if projects else []
+        recent = self._recent(ctx, candidate) if self._conversational(candidate) else []
         system = ROUTER + (FORWARDING if projects else "") + (
             f"\n团队的要求：\n{config.instructions}" if config.instructions else "")
         message = await model.complete(
@@ -150,12 +153,9 @@ class ModelRouter:
     def _continuable(ctx: RouterContext, candidate: Candidate) -> list[dict[str, Any]]:
         """The projects a single message from a person in their conversation might continue; none for a message
         already said in a project (it is a run of that project) or for anything else."""
-        if getattr(ctx, "projects", None) is None or len(candidate.triggers) != 1:
+        if getattr(ctx, "projects", None) is None or not ModelRouter._conversational(candidate):
             return []
-        trigger = candidate.triggers[0]
-        address = trigger.channel.address if trigger.channel else {}
-        if not trigger.human or not address.get("user") or str(address.get("thread", "")).startswith("p-"):
-            return []
+        address = candidate.triggers[0].channel.address
         try:
             return ctx.projects.open_for(address["user"])
         except Exception:  # noqa: BLE001 - without the list, the message is judged on its own
@@ -163,7 +163,18 @@ class ModelRouter:
             return []
 
     @staticmethod
+    def _conversational(candidate: Candidate) -> bool:
+        """A single message from a person in their conversation with the assistant (not one said in a project)."""
+        if len(candidate.triggers) != 1:
+            return False
+        trigger = candidate.triggers[0]
+        address = trigger.channel.address if trigger.channel else {}
+        return bool(trigger.human and address.get("user") and not str(address.get("thread", "")).startswith("p-"))
+
+    @staticmethod
     def _recent(ctx: RouterContext, candidate: Candidate) -> list[dict[str, Any]]:
+        if getattr(ctx, "projects", None) is None:
+            return []
         trigger = candidate.triggers[0]
         address = trigger.channel.address if trigger.channel else {}
         try:
