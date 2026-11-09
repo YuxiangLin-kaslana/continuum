@@ -739,6 +739,9 @@ class AgentExecutor:
                 delegate_config = (getattr(job, "delegates", None) or config.delegates()).get(name)
                 if delegate_config is None:
                     return f"错误：没有配置 {name}", False
+                if config.sandbox.kind == "host":
+                    # The machine is the workers' whole: the coding agents they call get it too.
+                    delegate_config = delegate_config.model_copy(update={"full_access": True})
                 answer = await cli_agents.delegate(name, delegate_config, job, str(args.get("task", "")),
                                                    bool(args.get("fresh")))
                 return answer if len(answer) <= 20000 else answer[:20000] + "\n...[后面截断]", False

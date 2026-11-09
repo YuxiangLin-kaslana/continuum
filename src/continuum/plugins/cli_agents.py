@@ -15,6 +15,9 @@ Isolation, both layers on by default:
 - Inside, each command it runs is sandboxed by the agent itself: Claude Code's sandbox, Codex's workspace-write mode.
   Neither lets a command write outside the workspace or reach the network unless configured to.
 A Claude Code whose sandbox cannot start ends the turn instead of running commands unsandboxed.
+
+With `full_access` (the person gave the workers this machine) both layers are off: the agent runs as the service's
+user with the host's home, programs and network, and its commands are not sandboxed or asked about.
 """
 
 from __future__ import annotations
@@ -54,6 +57,11 @@ TOOL_RULES = """你在帮 Continuum 的一个 Worker 完成它工单里的一件
 不要自己停下来等回答。"""
 
 MARKERS = {"【问题】": "ask", "【卡住】": "blocked", "【失败】": "failed", "【无需处理】": "dropped"}
+
+FULL_ACCESS = """
+【这台机器的完全权限】人给了你这台机器的完全权限：上面说的“只能写工作区”“没有网络”都不适用。你直接以服务的用户
+身份在主机上运行，可以联网、可以 sudo、能读写任何文件、能用本机的 gcloud、aws、gh、docker、systemctl。
+人要在这台机器上做的事就直接做；有影响的操作在回复里说清做了什么、怎么撤回。"""
 
 # Host paths no agent should see: Continuum's own home is added per ticket, and each kind hides the other's sign-in.
 HIDDEN = ["~/.config", "~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.netrc", "~/.npmrc",
@@ -111,6 +119,8 @@ class CliAgentConfig(BaseModel):
     # More environment variables for the agent's process (the host's own environment is not passed on).
     env: dict[str, str] = {}
     extra_args: list[str] = []
+    # The person gave the workers this whole machine: no isolation, no command sandbox, no permission prompts.
+    full_access: bool = False
 
 
 class ClaudeCodeConfig(CliAgentConfig):
@@ -428,7 +438,7 @@ class _CliAgentExecutor:
     label = "工具"
 
     def _isolated(self, config: Any, job: Any, argv: list[str]) -> list[str]:
-        if config.isolation == "none":
+        if config.isolation == "none" or config.full_access:
             return argv
         if shutil.which("bwrap") is None:
             raise RuntimeError("bubblewrap (bwrap) is not installed; set isolation = \"none\" only if the host isolates "
@@ -461,6 +471,10 @@ class _CliAgentExecutor:
             return
         argv = [found, *argv[1:]]
         env = {k: v for k, v in os.environ.items() if k in ENV_KEEP}
+        if config.full_access:
+            from .sandbox import host_env
+
+            env = host_env()
         # The command's own directory goes on PATH: an npm-installed agent finds its node and helpers there.
         env["PATH"] = os.pathsep.join([str(Path(found).parent), env.get("PATH", "/usr/local/bin:/usr/bin:/bin")])
         env.update({"HOME": str(Path.home()), "TMPDIR": "/tmp", "SHELL": "/bin/bash", "TERM": "dumb", "NO_COLOR": "1"},
@@ -487,7 +501,7 @@ class _CliAgentExecutor:
                 line = raw.decode("utf-8", "replace").rstrip()
                 errors.append(line)
                 del errors[:-40]
-                if self.unsafe(line):
+                if not config.full_access and self.unsafe(line):
                     run.error = "命令沙箱启动不了，为了安全没有继续。请在服务器上装好 bubblewrap 和 socat。"
                     _kill(process)
 
@@ -531,9 +545,13 @@ class ClaudeCodeExecutor(_CliAgentExecutor):
                                                 "allowUnsandboxedCommands": False, "failIfUnavailable": True}}
         if config.allowed_domains:
             settings["sandbox"]["network"] = {"allowedDomains": list(config.allowed_domains)}
+        mode = "acceptEdits"
+        if config.full_access:
+            settings = {"sandbox": {"enabled": False}}
+            mode, rules = "bypassPermissions", rules + FULL_ACCESS
         _merge(settings, config.settings)
         argv = [config.command, "-p", prompt, "--output-format", "stream-json", "--verbose",
-                "--include-partial-messages", "--permission-mode", "acceptEdits", "--allowedTools",
+                "--include-partial-messages", "--permission-mode", mode, "--allowedTools",
                 *config.allowed_tools, "--settings", json.dumps(settings), "--strict-mcp-config",
                 "--append-system-prompt", rules, "--max-turns", str(config.max_turns)]
         argv += ["--resume", session] if session else ["--session-id", new_session]
@@ -545,6 +563,7 @@ class ClaudeCodeExecutor(_CliAgentExecutor):
         return _ClaudeReader(run, job.workdir)
 
     def unsafe(self, stderr_line: str) -> bool:
+        # Only watched for when the sandbox is meant to be on; a run with full access turns it off on purpose.
         return "Sandbox disabled" in stderr_line or "Commands will run WITHOUT sandboxing" in stderr_line
 
 
@@ -559,12 +578,16 @@ class CodexExecutor(_CliAgentExecutor):
                 rules: str) -> list[str]:
         # Codex has no separate system prompt: the rules lead the first prompt of its session.
         if session is None:
-            prompt = f"{rules}\n\n{prompt}"
+            prompt = f"{rules}{FULL_ACCESS if config.full_access else ''}\n\n{prompt}"
         argv = [config.command, "exec"]
         if session:
             argv += ["resume", session]
-        argv += ["--json", "--skip-git-repo-check", "-c", 'sandbox_mode="workspace-write"',
-                 "-c", f"sandbox_workspace_write.network_access={'true' if config.network else 'false'}"]
+        argv += ["--json", "--skip-git-repo-check"]
+        if config.full_access:
+            argv += ["--dangerously-bypass-approvals-and-sandbox"]
+        else:
+            argv += ["-c", 'sandbox_mode="workspace-write"',
+                     "-c", f"sandbox_workspace_write.network_access={'true' if config.network else 'false'}"]
         if config.model:
             argv += ["-m", config.model]
         return argv + config.extra_args + [prompt]

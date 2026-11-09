@@ -247,6 +247,22 @@ def test_the_agent_process_is_isolated_from_the_hosts_secrets(tmp_path, monkeypa
     assert ("--tmpfs", str(home / ".claude")) in pairs and ("--bind", str(home / ".codex")) in pairs
 
 
+def test_with_the_whole_machine_the_agents_run_unisolated_unsandboxed_and_unasked(tmp_path):
+    job = FakeJob(tmp_path)
+    full = {"full_access": True}
+    assert ClaudeCodeExecutor()._isolated(ClaudeCodeConfig(**full), job, ["claude", "-p", "x"]) == ["claude", "-p", "x"]
+    claude = ClaudeCodeExecutor().command(ClaudeCodeConfig(**full), job, "task", None, "s-1", "rules")
+    assert claude[claude.index("--permission-mode") + 1] == "bypassPermissions"
+    assert json.loads(claude[claude.index("--settings") + 1])["sandbox"]["enabled"] is False
+    assert "完全权限" in claude[claude.index("--append-system-prompt") + 1]
+    # Without it, the sandbox stays on and a run that says it is off is stopped.
+    kept = ClaudeCodeExecutor().command(ClaudeCodeConfig(), job, "task", None, "s-1", "rules")
+    assert json.loads(kept[kept.index("--settings") + 1])["sandbox"]["failIfUnavailable"] is True
+    codex = CodexExecutor().command(CodexConfig(**full), job, "task", None, "s-1", "rules")
+    assert "--dangerously-bypass-approvals-and-sandbox" in codex and not any("workspace-write" in a for a in codex)
+    assert "完全权限" in codex[-1]
+
+
 @pytest.mark.parametrize("kind", ["claude_code", "codex"])
 def test_the_runtime_takes_either_agent_as_its_executor(tmp_path, kind):
     raw = tomllib.loads(DEFAULT_TOML)
