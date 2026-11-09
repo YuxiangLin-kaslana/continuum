@@ -302,7 +302,12 @@ def test_a_run_that_finished_its_turn_and_waits_for_no_one_is_closed_after_a_whi
                 rt._tick_idle()
                 return rt.store.tickets.get(ticket.id).ended is not None
 
-            await until(closed)
+            try:
+                await until(closed)
+            except AssertionError:
+                t = rt.store.tickets.get(ticket.id)
+                raise AssertionError(f"not closed: {t.model_dump_json(include={'ended', 'attention', 'assignments'})}"
+                                     f" updated={t.updated_at}") from None
             assert rt.store.tickets.get(ticket.id).ended.outcome == "stopped"
         finally:
             runner.cancel()

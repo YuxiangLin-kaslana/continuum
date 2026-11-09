@@ -341,8 +341,8 @@ class Runtime:
             session = self.executor.sessions.get(ticket.id)
             if ticket.attention is not None or (session is not None and session.busy) or ticket.updated_at > quiet:
                 continue
-            running = [a for a in ticket.assignments if a.state == "running"]
-            if not running:
+            # One about to start a worker is not idle; one whose assignment the engine already wound up is.
+            if not ticket.assignments or any(a.state == "pending" for a in ticket.assignments):
                 continue
             try:
                 self.engine.stop_ticket(ticket.id, "做完一轮后空闲超过 2 小时，自动归档")
