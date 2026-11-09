@@ -51,7 +51,48 @@ EMAIL_PRESETS = {
     "gmail": {"imap_host": "imap.gmail.com", "imap_port": 993, "smtp_host": "smtp.gmail.com", "smtp_port": 465},
     "outlook": {"imap_host": "outlook.office365.com", "imap_port": 993, "smtp_host": "smtp.office365.com",
                 "smtp_port": 587},
+    "qq": {"imap_host": "imap.qq.com", "imap_port": 993, "smtp_host": "smtp.qq.com", "smtp_port": 465},
+    "netease": {"imap_host": "imap.163.com", "imap_port": 993, "smtp_host": "smtp.163.com", "smtp_port": 465},
+    "icloud": {"imap_host": "imap.mail.me.com", "imap_port": 993, "smtp_host": "smtp.mail.me.com", "smtp_port": 587},
 }
+PRESET_NAMES = {"gmail": "Gmail", "outlook": "Outlook", "qq": "QQ 邮箱", "netease": "网易邮箱", "icloud": "iCloud"}
+# The provider a well-known address belongs to, by its domain.
+EMAIL_DOMAINS = {
+    "gmail.com": "gmail", "googlemail.com": "gmail",
+    "outlook.com": "outlook", "hotmail.com": "outlook", "live.com": "outlook", "msn.com": "outlook",
+    "outlook.cn": "outlook", "live.cn": "outlook",
+    "qq.com": "qq", "foxmail.com": "qq", "vip.qq.com": "qq",
+    "163.com": "netease", "126.com": "netease", "yeah.net": "netease",
+    "icloud.com": "icloud", "me.com": "icloud", "mac.com": "icloud",
+}
+# Microsoft's own mailboxes, which stopped taking passwords over IMAP in September 2024.
+MICROSOFT_PERSONAL = {"outlook.com", "hotmail.com", "live.com", "msn.com", "outlook.cn", "live.cn"}
+# Why a login was refused, and what to do about it, by provider.
+LOGIN_HINTS = {
+    "gmail": "Gmail 要先开两步验证，再到 myaccount.google.com/apppasswords 生成 16 位应用专用密码填进来（不是登录密码）。",
+    "outlook": "公司或学校的 Microsoft 365 邮箱要管理员允许 IMAP 和应用密码。",
+    "qq": "QQ 邮箱要在网页版 设置 → 账户 里开启 IMAP/SMTP 服务，用它给的授权码当密码（不是 QQ 密码）。",
+    "netease": "网易邮箱要在网页版 设置 → POP3/SMTP/IMAP 里开启 IMAP，用它给的授权码当密码。",
+    "icloud": "iCloud 要在 appleid.apple.com → 登录与安全 → App 专用密码 里生成一个填进来。",
+}
+
+
+def email_provider(address: str) -> str | None:
+    return EMAIL_DOMAINS.get(address.rpartition("@")[2].strip().lower())
+
+
+def login_refused(settings: dict[str, Any], error: Exception) -> str:
+    """Say in words why the mailbox would not let us in."""
+    text = error.args[0] if error.args else str(error)
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", "replace")
+    domain = str(settings.get("address") or "").rpartition("@")[2].lower()
+    if domain in MICROSOFT_PERSONAL:
+        hint = ("微软从 2024 年 9 月起不再让 outlook.com / hotmail / live 个人邮箱用密码（包括应用密码）登录 IMAP，"
+                "只能用微软账号授权（OAuth）登录。")
+    else:
+        hint = LOGIN_HINTS.get(str(settings.get("preset") or ""), "请确认填的是邮箱的应用专用密码或授权码，并且已开启 IMAP。")
+    return f"邮箱拒绝登录（{text}）。{hint}"
 OUTPUT_LIMIT = 15000
 
 
@@ -226,7 +267,15 @@ class Integrations:
             if fields.get("token"):
                 secrets_["token"] = str(fields["token"]).strip()
         elif kind == "email":
-            preset = EMAIL_PRESETS.get(str(fields.get("preset") or ""), {})
+            address = str(fields.get("address") or settings.get("address") or "")
+            belongs = email_provider(address)
+            if not fields.get("preset") and belongs:
+                fields = {**fields, "preset": belongs}
+            chosen = str(fields.get("preset") or "")
+            if belongs and chosen in EMAIL_PRESETS and chosen != belongs:
+                raise IntegrationError(f"{address} 是 {PRESET_NAMES[belongs]} 的地址，类型却选了 {PRESET_NAMES[chosen]}，"
+                                       f"请把类型改成 {PRESET_NAMES[belongs]}")
+            preset = EMAIL_PRESETS.get(chosen, {})
             for key in ("address", "imap_host", "smtp_host"):
                 if fields.get(key) or preset.get(key):
                     settings[key] = str(fields.get(key) or preset.get(key)).strip()
@@ -476,7 +525,15 @@ class Integrations:
         settings, password = self._email()
         imap = imaplib.IMAP4_SSL(settings["imap_host"], int(settings.get("imap_port") or 993),
                                  ssl_context=ssl.create_default_context(), timeout=30)
-        imap.login(settings["address"], password)
+        try:
+            imap.login(settings["address"], password)
+        except imaplib.IMAP4.error as error:
+            imap.shutdown()
+            raise IntegrationError(login_refused(settings, error)) from None
+        if settings.get("preset") == "netease":
+            # NetEase turns away clients that do not say who they are ("Unsafe Login").
+            imaplib.Commands.setdefault("ID", ("AUTH", "SELECTED"))
+            imap._simple_command("ID", '("name" "continuum" "version" "1.0")')
         return imap
 
     @_scoped("email")

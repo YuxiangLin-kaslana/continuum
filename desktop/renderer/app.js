@@ -1155,7 +1155,7 @@
   const TOOL_FORMS = {
     github: { name: 'GitHub', hint: '在 GitHub → Settings → Developer settings → Personal access tokens 建一个令牌（fine-grained，选要用的仓库和权限）。',
       fields: [['token', '令牌', 'password']] },
-    email: { name: '邮箱', hint: 'Gmail 要先开两步验证，再在“应用专用密码”里生成一个密码填这里，不是登录密码。',
+    email: { name: '邮箱', hint: '填邮箱地址会自动选好类型。密码处要填应用专用密码或授权码，不是登录密码。',
       fields: [['preset', '类型', 'select'], ['address', '邮箱地址', 'text'], ['password', '应用专用密码', 'password'],
         ['imap_host', '收信服务器（IMAP）', 'text', 'custom'], ['imap_port', 'IMAP 端口', 'number', 'custom'],
         ['smtp_host', '发信服务器（SMTP）', 'text', 'custom'], ['smtp_port', 'SMTP 端口', 'number', 'custom']] },
@@ -1170,6 +1170,22 @@
     aws: { name: 'AWS', hint: '在 AWS IAM 建一个用户（或用现有的），给它需要的权限（比如 EC2、S3、Route 53 的只读或管理），再建一个 Access Key。助理只用这把密钥，不用服务器自己的 AWS 身份。',
       fields: [['access_key_id', 'Access Key ID', 'password'], ['secret_access_key', 'Secret Access Key', 'password'],
         ['region', '默认区域', 'text']] },
+  };
+  const EMAIL_TYPES = [['gmail', 'Gmail'], ['outlook', 'Outlook / Microsoft 365'], ['qq', 'QQ 邮箱'],
+    ['netease', '网易邮箱（163 / 126）'], ['icloud', 'iCloud'], ['custom', '其他']];
+  const EMAIL_DOMAINS = {
+    'gmail.com': 'gmail', 'googlemail.com': 'gmail', 'outlook.com': 'outlook', 'hotmail.com': 'outlook',
+    'live.com': 'outlook', 'msn.com': 'outlook', 'outlook.cn': 'outlook', 'live.cn': 'outlook', 'qq.com': 'qq',
+    'foxmail.com': 'qq', 'vip.qq.com': 'qq', '163.com': 'netease', '126.com': 'netease', 'yeah.net': 'netease',
+    'icloud.com': 'icloud', 'me.com': 'icloud', 'mac.com': 'icloud',
+  };
+  const EMAIL_HINTS = {
+    gmail: 'Gmail：先开两步验证，再到 myaccount.google.com/apppasswords 生成 16 位应用专用密码。',
+    outlook: '注意：outlook.com / hotmail / live 个人邮箱从 2024 年 9 月起微软已不允许密码或应用密码登录 IMAP；公司的 Microsoft 365 邮箱要管理员开启 IMAP。',
+    qq: 'QQ 邮箱：网页版 设置 → 账户 → 开启 IMAP/SMTP 服务，用生成的授权码。',
+    netease: '网易邮箱：网页版 设置 → POP3/SMTP/IMAP → 开启 IMAP，用生成的授权码。',
+    icloud: 'iCloud：appleid.apple.com → 登录与安全 → App 专用密码。',
+    custom: '填你的邮件服务商给的 IMAP / SMTP 服务器和端口。',
   };
   // The form for one account of a tool: `target` says which (`account_id`), or that it is a new one.
   function toolForm(t, form, done, target = { new: true }) {
@@ -1192,13 +1208,9 @@
       let input;
       if (type === 'select') {
         input = el('select');
-        for (const [value, text] of [['gmail', 'Gmail'], ['outlook', 'Outlook / Microsoft 365'], ['custom', '其他']]) {
-          input.append(Object.assign(el('option', '', text), { value }));
-        }
+        for (const [value, text] of EMAIL_TYPES) input.append(Object.assign(el('option', '', text), { value }));
         input.value = (t.settings && t.settings.preset) || 'gmail';
-        input.addEventListener('change', () => {
-          for (const node of grid.querySelectorAll('[data-only=custom]')) node.hidden = input.value !== 'custom';
-        });
+        input.addEventListener('change', () => showPreset());
       } else if (type === 'textarea') {
         input = el('textarea');
         input.rows = 5;
@@ -1219,8 +1231,25 @@
       inputs[key] = input;
       grid.append(wrap);
     }
-    for (const node of grid.querySelectorAll('[data-only=custom]')) {
-      node.hidden = !inputs.preset || inputs.preset.value !== 'custom';
+    const presetHint = el('p', 'hint wide');
+    function showPreset() {
+      if (!inputs.preset) return;
+      for (const node of grid.querySelectorAll('[data-only=custom]')) node.hidden = inputs.preset.value !== 'custom';
+      const words = EMAIL_HINTS[inputs.preset.value] || '';
+      presetHint.textContent = words;
+      presetHint.hidden = !words;
+    }
+    if (inputs.preset) {
+      inputs.preset.parentNode.after(presetHint);
+      // A well-known address says which provider it is.
+      inputs.address.addEventListener('input', () => {
+        const found = EMAIL_DOMAINS[inputs.address.value.split('@')[1]?.trim().toLowerCase()];
+        if (found && inputs.preset.value !== found) {
+          inputs.preset.value = found;
+          showPreset();
+        }
+      });
+      showPreset();
     }
     const error = el('p', 'error');
     error.hidden = true;

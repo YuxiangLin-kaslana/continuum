@@ -483,6 +483,7 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 .tool-form .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
 .tool-form label { display: grid; gap: 5px; font-size: 12.5px; color: var(--soft); }
 .tool-form label.wide { grid-column: 1 / -1; }
+.tool-form .hint.wide { grid-column: 1 / -1; margin: -4px 0 0; }
 .tool-form label[hidden] { display: none; }
 .tool-form textarea { font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; resize: vertical; }
 .tool-form .actions { display: flex; gap: 8px; justify-content: flex-end; }

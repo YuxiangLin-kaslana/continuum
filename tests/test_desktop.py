@@ -307,6 +307,12 @@ def test_the_settings_page_adds_tests_and_removes_ssh_servers():
         assert page.evaluate("window.__fake.savedTools.github")["new"] is True
         page.click("#tool-list [data-tool=email]")
         assert page.locator("#tool-pane label", has_text="收信服务器").is_hidden()
+        # The address says which provider it is, and the hint follows.
+        page.fill("#tool-pane input >> nth=1", "me@outlook.com")
+        assert page.input_value("#tool-pane select") == "outlook" and "OAuth" not in page.inner_text("#tool-pane")
+        assert "2024 年 9 月" in page.inner_text("#tool-pane")
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-email.png")
         page.select_option("#tool-pane select", "custom")
         assert page.locator("#tool-pane label", has_text="收信服务器").is_visible()
         # A coding agent: who it is signed in as, and a switch.

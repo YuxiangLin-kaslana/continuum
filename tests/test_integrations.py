@@ -286,3 +286,21 @@ def test_a_tool_kept_before_accounts_becomes_the_default_account(tmp_path):
     tools = Integrations(tmp_path)
     [only] = tools.accounts("slack")
     assert only["id"] == "default" and only["label"] == "默认" and tools.connected() == {"slack"}
+
+
+def test_a_mailbox_type_follows_its_address_and_a_refused_login_says_why(tmp_path):
+    import imaplib
+
+    from continuum.runtime.integrations import login_refused
+
+    tools = Integrations(tmp_path)
+    # Nothing chosen: a well-known address picks its provider.
+    tools.save("email", {"address": "me@qq.com", "password": "code"})
+    assert tools.get("email")["settings"]["imap_host"] == "imap.qq.com"
+    # The wrong one chosen is turned away with what to pick instead.
+    with pytest.raises(IntegrationError, match="Outlook"):
+        tools.save("email", {"preset": "gmail", "address": "me@outlook.com", "password": "x"})
+    refused = imaplib.IMAP4.error(b"[AUTHENTICATIONFAILED] Invalid credentials (Failure)")
+    words = login_refused({"address": "me@hotmail.com", "preset": "outlook"}, refused)
+    assert "b'" not in words and "OAuth" in words
+    assert "apppasswords" in login_refused({"address": "me@example.com", "preset": "gmail"}, refused)
