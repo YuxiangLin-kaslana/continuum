@@ -276,17 +276,26 @@ def test_a_run_that_finished_its_turn_and_waits_for_no_one_is_closed_after_a_whi
         ctx = rt.sources["app"]
         try:
             ctx.kind.post(ctx, "me", "main", "随便看看")
-            await until(lambda: bool(rt.store.tickets.list()) and not any(
-                s.busy for s in rt.executor.sessions.values()))
+            def turned():
+                found = rt.store.tickets.list()
+                return bool(found) and bool(found[0].assignments) and found[0].assignments[-1].report is not None \
+                    and found[0].assignments[-1].state == "running" and not any(
+                        s.busy for s in rt.executor.sessions.values())
+
+            await until(turned)
             [ticket] = rt.store.tickets.list()
             assert ticket.ended is None
             rt._idle_at = 0
             rt._tick_idle()
             assert rt.store.tickets.get(ticket.id).ended is None  # quiet, but not for long yet
             rt.IDLE_CLOSE = __import__("datetime").timedelta(seconds=0)
-            rt._idle_at = 0
-            rt._tick_idle()
-            await until(lambda: rt.store.tickets.get(ticket.id).ended is not None)
+
+            def closed():
+                rt._idle_at = 0
+                rt._tick_idle()
+                return rt.store.tickets.get(ticket.id).ended is not None
+
+            await until(closed)
             assert rt.store.tickets.get(ticket.id).ended.outcome == "stopped"
         finally:
             runner.cancel()
