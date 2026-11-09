@@ -183,12 +183,28 @@ INTEGRATION_TOOLS = {
                      "GET /v1/domains/<域名>/records、PATCH /v1/domains/<域名>/records。", _HTTP,
                      required=["method", "path"])],
 }
-INTEGRATION_STEP = {"github": "github", "email_search": "email", "email_read": "email", "email_send": "email",
+INTEGRATION_TOOLS["aws"] = [tool(
+    "aws", "用人连接的 AWS 密钥执行一条 aws 命令；args 是 aws 后面的部分，比如 \"ec2 describe-instances\"、"
+    "\"s3 ls\"、\"route53 list-hosted-zones\"。权限只有这把密钥允许的那些。", {"args": {"type": "string"}})]
+TOOL_KINDS = {"github": "GitHub", "email": "邮箱", "slack": "Slack", "google": "Google（Cloud / Drive / Docs）",
+              "cloudflare": "Cloudflare", "godaddy": "GoDaddy", "aws": "AWS"}
+REQUEST_TOOL = tool(
+    "request_tool", "请人连接一个还没连接的工具（或重新连接连不上的）：对话里会出现一张卡片，人在卡片里填凭据，"
+    "凭据直接存到服务器，不经过你。这一步会等人填完（最多 30 分钟）；连上后对应的工具马上就能用。",
+    {"kind": {"type": "string", "enum": list(TOOL_KINDS)},
+     "reason": {"type": "string", "description": "一句话：要它做什么、需要哪些权限（比如“读写 o2 仓库的 PR”）"}},
+    required=["kind", "reason"])
+TOOL_WAIT = 30 * 60
+INTEGRATION_STEP = {"aws": "aws", "github": "github", "email_search": "email", "email_read": "email", "email_send": "email",
                     "slack": "slack", "gcloud": "google", "google_api": "google", "cloudflare": "cloudflare",
-                    "godaddy": "godaddy"}
+                    "godaddy": "godaddy", "request_tool": "request_tool"}
 INTEGRATION_RULES = """
-你还能用人连接的这些工具（由 Continuum 代为调用，凭据不在你这里）：{names}。
-发邮件、发 Slack 消息、改 DNS 记录、改 GitHub 上的东西这类会对外产生影响的操作，只在请求明确要求时做，做之前想清楚范围。
+人的其他工具（由 Continuum 代为调用，凭据不在你这里）：已连接：{connected}；没连接：{missing}。
+请求需要一个没连接（或连不上）的工具时，或者人让你“加上某个权限 / 连上某个账号”时，用 request_tool 向人要：说清要它做什么、
+需要哪些权限，人会在对话里的卡片里填凭据。不要让人把令牌、密码、密钥写在消息里；人如果写了，提醒他改到卡片里填，
+不要复述它们。
+发邮件、发 Slack 消息、改 DNS 记录、改 GitHub 上的东西、改 AWS 资源这类会对外产生影响的操作，只在请求明确要求时做，
+做之前想清楚范围。
 """
 
 APPROVAL_TIMEOUT = 30 * 60
@@ -374,9 +390,14 @@ class AgentExecutor:
         job.crew = getattr(ctx, "crew", None)
         job.model = model
         job.integrations, connected = _integrations_for(ctx, job)
-        tools = [*TOOLS, *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
-                 *(PROJECT_TOOLS if job.projects else []), *([DISPATCH] if job.crew else []),
-                 *(t for kind in connected for t in INTEGRATION_TOOLS[kind])]
+
+        def offered() -> list[dict[str, Any]]:
+            # Asked again at every step: a tool the person connects during the turn can be used at once.
+            now_connected = [k for k in INTEGRATION_TOOLS if job.integrations and k in job.integrations.connected()]
+            return [*TOOLS, *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
+                    *(PROJECT_TOOLS if job.projects else []), *([DISPATCH] if job.crew else []),
+                    *(t for kind in now_connected for t in INTEGRATION_TOOLS[kind]),
+                    *([REQUEST_TOOL] if job.integrations is not None and job.projects is not None else [])]
         if not messages:
             system = SYSTEM + (DELEGATING.format(names="、".join(delegates)) if delegates else "")
             system += SSH_RULES if job.ssh else ""
@@ -386,7 +407,10 @@ class AgentExecutor:
                 local = datetime.now(UTC).astimezone(zone(tz))
                 system += PROJECT_RULES.format(tz=tz, now=local.strftime("%Y-%m-%d %H:%M %A"))
             system += LEAD_RULES.format(most=MAX_DISPATCH) if job.crew else ""
-            system += INTEGRATION_RULES.format(names="、".join(connected)) if connected else ""
+            if job.integrations is not None:
+                missing = [TOOL_KINDS[k] for k in TOOL_KINDS if k not in connected]
+                system += INTEGRATION_RULES.format(connected="、".join(TOOL_KINDS[k] for k in connected) or "无",
+                                                   missing="、".join(missing) or "无")
             system += f"\n团队的要求：\n{config.instructions}\n" if config.instructions else ""
             messages = [{"role": "system", "content": system}, {"role": "user", "content": job.assignment}]
         job.workdir.mkdir(parents=True, exist_ok=True)
@@ -402,10 +426,10 @@ class AgentExecutor:
                 started = time.monotonic()
                 live = _Live(job)
                 if hasattr(model, "stream"):
-                    message = await model.stream(messages, tools=tools, on_progress=live, **config.extra)
+                    message = await model.stream(messages, tools=offered(), on_progress=live, **config.extra)
                     live(message, final=True)
                 else:
-                    message = await model.complete(messages, tools=tools, **config.extra)
+                    message = await model.complete(messages, tools=offered(), **config.extra)
                 self._show_words(job, message, time.monotonic() - started)
                 kept = {k: v for k, v in message.items() if k in ("role", "content", "tool_calls", "reasoning_content")}
                 kept["content"] = kept.get("content") or ""
@@ -505,7 +529,9 @@ class AgentExecutor:
                    "gcloud": lambda a: f"gcloud {a.get('args', '')}",
                    "google_api": lambda a: f"{a.get('method', 'GET')} {a.get('url', '')}",
                    "cloudflare": lambda a: f"{a.get('method', 'GET')} {a.get('path', '')}",
-                   "godaddy": lambda a: f"{a.get('method', 'GET')} {a.get('path', '')}"}[name](args)
+                   "godaddy": lambda a: f"{a.get('method', 'GET')} {a.get('path', '')}",
+                   "aws": lambda a: f"aws {a.get('args', '')}",
+                   "request_tool": lambda a: f"请你连接 {TOOL_KINDS.get(str(a.get('kind')), a.get('kind'))}"}[name](args)
         step = {"type": "step", "key": key, "name": INTEGRATION_STEP[name], "input": summary[:300]}
         job.activity({**step, "status": "running", "output": ""})
         try:
@@ -513,8 +539,12 @@ class AgentExecutor:
                 raise ValueError("这个工具没有连接")
             if "_invalid" in args:
                 raise ValueError(f"参数不是合法的 JSON：{args['_invalid'][:200]}")
-            if name == "github":
+            if name == "request_tool":
+                result = await self._request_tool(job, found, args)
+            elif name == "github":
                 result = await found.github(str(args.get("args", "")))
+            elif name == "aws":
+                result = await found.aws(str(args.get("args", "")))
             elif name == "email_search":
                 result = await found.email_search(str(args.get("query", "")), str(args.get("folder") or "INBOX"),
                                                   int(args.get("limit") or 20))
@@ -539,6 +569,29 @@ class AgentExecutor:
             result, failed = f"错误：{error}", True
         job.activity({**step, "status": "error" if failed else "done", "output": _clip(result)})
         return result
+
+    async def _request_tool(self, job, found: Any, args: dict[str, Any]) -> str:
+        """Ask the person, through a card in the conversation, to connect a tool; wait until they do."""
+        kind = str(args.get("kind", ""))
+        if kind not in TOOL_KINDS:
+            raise ValueError(f"没有叫 {kind} 的工具")
+        current = next((t for t in found.view() if t["kind"] == kind), {})
+        if current.get("connected") and (current.get("test") or {}).get("ok"):
+            return f"{TOOL_KINDS[kind]} 已经连接（{current.get('account')}），直接用就行。"
+        desk = getattr(job, "projects", None)
+        if desk is None or not hasattr(desk, "ask_for_tool"):
+            raise ValueError("这里没法请人连接工具")
+        asked_at = (current.get("test") or {}).get("at")
+        desk.ask_for_tool(job, kind, str(args.get("reason", "")))
+        loop = asyncio.get_running_loop()
+        end = loop.time() + TOOL_WAIT
+        while loop.time() < end:
+            await asyncio.sleep(1)
+            now = next((t for t in found.view() if t["kind"] == kind), {})
+            test = now.get("test") or {}
+            if now.get("connected") and test.get("ok") and test.get("at") != asked_at:
+                return f"人已经连接了 {TOOL_KINDS[kind]}（{now.get('account')}），现在可以用它的工具了。"
+        return f"等了 30 分钟，人还没有连接 {TOOL_KINDS[kind]}。告诉人需要它做什么，等他连上后再说。"
 
     async def _subwork(self, job, config: AgentConfig, number: int, label: str, task: str,
                        entry: dict[str, Any]) -> str:

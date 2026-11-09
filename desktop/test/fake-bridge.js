@@ -47,7 +47,7 @@
   ];
   const steps = [];
   const approvals = {};
-  const toolList = ['github', 'email', 'slack', 'google', 'cloudflare', 'godaddy']
+  const toolList = ['github', 'email', 'slack', 'google', 'cloudflare', 'godaddy', 'aws']
     .map((kind) => ({ kind, connected: false, account: null, settings: {}, test: null }));
   let nextStep = 1;
   const step = (project, ticket, key, name, input, status, output = '') => {
@@ -173,6 +173,22 @@
             { project: 'new1', project_name: '每日交期提醒', state: 'proposed' }) });
           fire('event', { type: 'message', message: add(owner, 'reply', '提议了「每日交期提醒」，请确认。', ticket) });
           closed(ticket);
+          live({ type: 'idle' });
+        })();
+        return ok(row);
+      }
+      if (text.includes('AWS')) {
+        // A worker that needs a tool not connected asks for it with a card, and waits until it is.
+        (async () => {
+          await wait(30);
+          ack();
+          fire('event', { type: 'message', message: add(owner, 'credential', '需要你连接 AWS', ticket,
+            { kind: 'aws', reason: '看 EC2 实例和 Route 53 的记录', state: 'waiting' }) });
+          while (!toolList.find((t) => t.kind === 'aws').connected) await wait(50);
+          const card = messages.find((m) => m.role === 'credential' && m.ticket_id === ticket);
+          card.meta = { ...card.meta, state: 'connected', account: 'arn:aws:iam::1234:user/continuum' };
+          fire('event', { type: 'message-updated', message: { ...card } });
+          fire('event', { type: 'message', message: add(owner, 'reply', '连上了，共有 3 台 EC2 实例。', ticket) });
           live({ type: 'idle' });
         })();
         return ok(row);

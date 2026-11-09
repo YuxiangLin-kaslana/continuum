@@ -9,7 +9,8 @@ connected tool through the host, so the credentials never enter its sandbox:
 - slack: the Slack Web API with a bot token;
 - google: `gcloud` with a service account, and the Google APIs (Drive, Docs, Sheets, Cloud) with its token;
 - cloudflare: the Cloudflare API (zones, DNS records) with an API token;
-- godaddy: the GoDaddy API (domains, DNS records) with an API key and secret.
+- godaddy: the GoDaddy API (domains, DNS records) with an API key and secret;
+- aws: the `aws` command line with an access key, never the host's own instance role.
 """
 
 from __future__ import annotations
@@ -37,7 +38,9 @@ from typing import Any
 
 import httpx
 
-KINDS = ("github", "email", "slack", "google", "cloudflare", "godaddy")
+KINDS = ("github", "email", "slack", "google", "cloudflare", "godaddy", "aws")
+NAMES = {"github": "GitHub", "email": "邮箱", "slack": "Slack", "google": "Google（Cloud / Drive / Docs）",
+         "cloudflare": "Cloudflare", "godaddy": "GoDaddy", "aws": "AWS"}
 # The HTTP APIs a worker calls by path, each with its base address.
 API_BASES = {"cloudflare": "https://api.cloudflare.com/client/v4", "godaddy": "https://api.godaddy.com"}
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/cloud-platform", "https://www.googleapis.com/auth/drive",
@@ -67,6 +70,7 @@ class Integrations:
         # The commands, so tests can stand in for them.
         self.gh = "gh"
         self.gcloud = "gcloud"
+        self.aws_cli = "aws"
 
     # --- what is kept ---
 
@@ -114,6 +118,14 @@ class Integrations:
         if kind in ("github", "cloudflare"):
             if fields.get("token"):
                 secrets_["token"] = str(fields["token"]).strip()
+        elif kind == "aws":
+            for key in ("access_key_id", "secret_access_key", "session_token"):
+                if fields.get(key):
+                    secrets_[key] = str(fields[key]).strip()
+            if fields.get("region") or not settings.get("region"):
+                settings["region"] = str(fields.get("region") or "us-east-1").strip()
+            if "access_key_id" in secrets_ and "secret_access_key" not in secrets_:
+                raise IntegrationError("AWS 要填 Access Key ID 和 Secret Access Key")
         elif kind == "godaddy":
             for key in ("key", "secret"):
                 if fields.get(key):
@@ -228,6 +240,39 @@ class Integrations:
         if code != 0:
             raise IntegrationError(output.strip()[-200:] or "令牌不对")
         return output.strip()
+
+    # --- AWS ---
+
+    def _aws_env(self) -> dict[str, str]:
+        body = self.get("aws") or {}
+        found, settings = body.get("secrets") or {}, body.get("settings") or {}
+        if not found.get("access_key_id") or not found.get("secret_access_key"):
+            raise IntegrationError("AWS 还没有连接")
+        env = self._env({
+            "AWS_ACCESS_KEY_ID": found["access_key_id"], "AWS_SECRET_ACCESS_KEY": found["secret_access_key"],
+            "AWS_DEFAULT_REGION": settings.get("region") or "us-east-1", "AWS_PAGER": "",
+            # Only the person's key: never the host's own role, nor any profile on the host.
+            "AWS_EC2_METADATA_DISABLED": "true", "AWS_CONFIG_FILE": str(self.folder / "aws-config-none"),
+            "AWS_SHARED_CREDENTIALS_FILE": str(self.folder / "aws-credentials-none")})
+        if found.get("session_token"):
+            env["AWS_SESSION_TOKEN"] = found["session_token"]
+        return env
+
+    async def aws(self, args: str) -> str:
+        argv = shlex.split(args)
+        if argv and argv[0] == "aws":
+            argv = argv[1:]
+        if not argv:
+            raise IntegrationError("要给 aws 的参数，比如 \"ec2 describe-instances\"")
+        code, output = await self._command([self.aws_cli, *argv], self._aws_env(), timeout=180)
+        return _clip(f"[exit code {code}]\n{output}")
+
+    async def _test_aws(self) -> str:
+        code, output = await self._command([self.aws_cli, "sts", "get-caller-identity", "--output", "json"],
+                                           self._aws_env(), timeout=30)
+        if code != 0:
+            raise IntegrationError(output.strip()[-200:] or "密钥不对")
+        return json.loads(output).get("Arn", "?")
 
     # --- HTTP APIs: Cloudflare and GoDaddy ---
 

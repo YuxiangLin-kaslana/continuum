@@ -282,7 +282,7 @@ def test_the_settings_page_adds_tests_and_removes_ssh_servers():
 
         # The person's other tools: connect one, and its secret never shows again.
         page.wait_for_selector(".card.tool[data-tool=github]")
-        assert page.locator(".card.tool").count() == 6
+        assert page.locator(".card.tool").count() == 7
         github = page.locator(".card.tool[data-tool=github]")
         github.get_by_role("button", name="连接").click()
         assert "Personal access tokens" in github.inner_text()
@@ -557,5 +557,46 @@ def test_searching_the_conversation_finds_and_goes_to_a_message():
         assert page.inner_text(".search-none") == "没有找到「没有这句话」"
         page.press("#search", "Escape")
         assert page.input_value("#search") == "" and page.is_hidden("#search-results")
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.skipif(_browser() is None, reason="needs playwright")
+def test_a_worker_asks_for_a_tool_and_the_person_connects_it_on_the_card():
+    sync_playwright = _browser()
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_context(viewport={"width": 520, "height": 780}, bypass_csp=True).new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.add_init_script(path=str(DESKTOP / "test" / "fake-bridge.js"))
+        page.goto((DESKTOP / "renderer" / "index.html").as_uri())
+        page.wait_for_selector("#app[data-ready]")
+        page.fill("#username", "me")
+        page.fill("#password", "good-password")
+        page.click("#connect")
+        page.wait_for_selector("#main:not([hidden])")
+
+        page.fill("#input", "帮我看看 AWS 上有几台机器")
+        page.press("#input", "Enter")
+        card = page.locator(".msg.credential")
+        card.wait_for()
+        assert "需要你连接 AWS" in card.inner_text() and "用来：看 EC2 实例和 Route 53 的记录" in card.inner_text()
+        assert "不会出现在对话里" in card.inner_text()
+        card.get_by_role("button", name="填写凭据").click()
+        assert "Access Key" in card.inner_text() and "不用服务器自己的 AWS 身份" in card.inner_text()
+        passwords = card.locator("input[type=password]")
+        passwords.nth(0).fill("AKIAEXAMPLEKEY")
+        passwords.nth(1).fill("secretsecret")
+        # Whatever arrives meanwhile redraws the conversation; what is typed stays.
+        page.evaluate("window.__fake.fire('event', { type: 'thinking', ticket_id: 'x', project: 'x' })")
+        assert passwords.nth(0).input_value() == "AKIAEXAMPLEKEY"
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-credential.png")
+        card.get_by_role("button", name="保存并测试").click()
+        page.wait_for_selector(".msg.credential >> text=已连接：arn:aws:iam::1234:user/continuum")
+        page.wait_for_selector(".msg.reply >> text=连上了，共有 3 台 EC2 实例。")
+        assert "AKIAEXAMPLEKEY" not in page.inner_text("#messages")
+        assert page.evaluate("window.__fake.savedTools.aws.access_key_id") == "AKIAEXAMPLEKEY"
         assert errors == []
         browser.close()

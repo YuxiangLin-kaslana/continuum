@@ -228,10 +228,15 @@ Worker 的 `ssh_hosts` 列出每台机器概况的第一句，`ssh_profile` 读�
 
 ## 其他工具
 
-设置页的“工具”里可以连接 GitHub、邮箱、Slack、Google（Cloud / Drive / Docs）、Cloudflare、GoDaddy。凭据只存在服务器
+设置页的“工具”里可以连接 GitHub、邮箱、Slack、Google（Cloud / Drive / Docs）、Cloudflare、GoDaddy、AWS。凭据只存在服务器
 `<home>/integrations/<工具>.json`（600 权限）里，不进数据库，也不再回传给桌面端；保存时马上测试一次，记下连的是哪个账号。
 
 Worker（以及它派出的子 Worker）在发起人是管理员、工具已连接时多出对应的工具，都由服务器代为调用，凭据不进沙箱：
 `github`（执行 gh）、`email_search` / `email_read` / `email_send`（IMAP / SMTP）、`slack`（Web API）、`gcloud` 和
 `google_api`（服务账号；服务账号只能看到共享给它的 Drive 文件）、`cloudflare` 和 `godaddy`（按路径调用它们的 API）。
 工具输出里如果出现已保存的凭据，一律换成 `***`。
+
+- `aws`：执行 aws 命令，只用人给的 Access Key（关掉实例元数据和本机配置文件），权限等于这把密钥允许的。
+- **Worker 自己要工具**：请求需要一个没连接的工具，或人让它“加上某个权限”时，Worker 调 `request_tool`：主对话里出现一张卡片，
+  写明要它做什么、去哪里申请；人在卡片里填，凭据直接存到服务器，不进对话、不发给模型。Worker 等到连上（最多 30 分钟），
+  同一轮里马上就能用新工具。

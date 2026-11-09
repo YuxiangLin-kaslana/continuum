@@ -30,7 +30,7 @@ from continuum.policy.gate import RulePolicy
 
 from .accounts import Accounts
 from .crew import Crew
-from .integrations import Integrations
+from .integrations import NAMES, Integrations
 from .projects import Projects, project_of_thread, zone
 from .ssh import SshHosts, survey
 from .effects import Effects
@@ -497,6 +497,27 @@ class ProjectDesk:
 
     def timezone_of(self, user: str) -> str:
         return self.rt.timezone_of(user)
+
+    # --- for a worker: asking the person to connect a tool ---
+
+    def ask_for_tool(self, job: Any, kind: str, reason: str) -> None:
+        """A card in the person's conversation where they give a tool's credentials, straight to the server."""
+        owner = getattr(job, "requester", None)
+        ctx = self.rt.app_source()
+        if not owner or ctx is None:
+            raise ValueError("只有通过对话提的请求才能请人连接工具")
+        ctx.kind.say(ctx, owner, "main", "credential", f"需要你连接 {NAMES.get(kind, kind)}",
+                     {"kind": kind, "reason": reason[:300], "state": "waiting"}, ticket_id=job.ticket_id)
+
+    def tool_connected(self, user: str, kind: str, account: str | None) -> None:
+        """Cards that asked for this tool say it is done."""
+        ctx = self.rt.app_source()
+        if ctx is None:
+            return
+        for message in ctx.kind.everything(ctx, user, limit=500):
+            meta = message.get("meta") or {}
+            if message["role"] == "credential" and meta.get("kind") == kind and meta.get("state") == "waiting":
+                ctx.kind.update_meta(ctx, message["id"], {**meta, "state": "connected", "account": account})
 
     # --- for the router: a message may continue a project instead of starting one ---
 

@@ -443,10 +443,13 @@ def create_app(rt: Runtime) -> FastAPI:
         ssh_admin(user)
         try:
             rt.integrations.save(kind, body)
-            await rt.integrations.test(kind)
+            tested = await rt.integrations.test(kind)
         except IntegrationError as error:
             raise HTTPException(422, str(error)) from None
-        return tool_view(kind)
+        view = tool_view(kind)
+        if tested.get("ok"):
+            rt.executor.context.projects.tool_connected(user, kind, view.get("account"))
+        return view
 
     @app.post("/api/v1/integrations/{kind}/test")
     async def test_tool(kind: str, user: str = Depends(user_of)) -> dict[str, Any]:

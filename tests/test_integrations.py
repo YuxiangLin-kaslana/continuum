@@ -145,7 +145,7 @@ def test_the_settings_api_connects_tools_for_admins_only_and_never_returns_secre
                 saved = await c.put("/api/v1/integrations/github", headers=me, json={"token": "ghp_secret"})
                 assert saved.status_code == 200 and saved.json()["connected"] and saved.json()["test"]["ok"]
                 page = await c.get("/api/v1/integrations", headers=me)
-                assert "ghp_secret" not in page.text and len(page.json()["tools"]) == 6
+                assert "ghp_secret" not in page.text and len(page.json()["tools"]) == 7
                 assert (await c.put("/api/v1/integrations/nothing", headers=me, json={})).status_code == 422
                 assert (await c.delete("/api/v1/integrations/github", headers=me)).json() == {"removed": True}
         finally:
@@ -177,4 +177,71 @@ def test_a_worker_uses_a_connected_tool_through_the_host(tmp_path):
 
     answers, system = asyncio.run(main())
     assert answers[-1][1].startswith("[exit code 0]") and "ghp_secret" not in answers[-1][1]
-    assert "github" in system
+    assert "已连接：GitHub" in system
+
+
+def test_aws_uses_the_persons_key_and_never_the_hosts_own_role(tmp_path):
+    script = tmp_path / "fake-aws"
+    script.write_text(f"#!{sys.executable}\nimport os, sys, json\n"
+                      "e = os.environ\n"
+                      "if sys.argv[1:3] == ['sts', 'get-caller-identity']:\n"
+                      "    print(json.dumps({'Arn': 'arn:aws:iam::1:user/c'})); sys.exit(0)\n"
+                      "print(json.dumps({'argv': sys.argv[1:], 'key': e.get('AWS_ACCESS_KEY_ID'), "
+                      "'imds': e.get('AWS_EC2_METADATA_DISABLED'), 'region': e.get('AWS_DEFAULT_REGION'), "
+                      "'profile': e.get('AWS_SHARED_CREDENTIALS_FILE')}))\n")
+    script.chmod(0o755)
+    tools = Integrations(tmp_path)
+    tools.aws_cli = str(script)
+    with pytest.raises(IntegrationError):
+        tools.save("aws", {"access_key_id": "AKIA1"})
+    tools.save("aws", {"access_key_id": "AKIAEXAMPLEKEY", "secret_access_key": "secretsecret", "region": "eu-west-2"})
+    assert asyncio.run(tools.test("aws"))["message"] == "已连接：arn:aws:iam::1:user/c"
+    out = json.loads(asyncio.run(tools.aws("aws ec2 describe-instances")).split("\n", 1)[1])
+    assert out["argv"] == ["ec2", "describe-instances"] and out["key"] == "AKIAEXAMPLEKEY"
+    assert out["imds"] == "true" and out["region"] == "eu-west-2" and "none" in out["profile"]
+
+
+def test_a_worker_asks_for_a_tool_the_person_connects_it_on_the_card_and_the_worker_goes_on(tmp_path):
+    router = ScriptedModel(call("decide", decision="accept", title="看 PR", scope="看", acknowledgement="好。",
+                                reason="r"))
+    offered = []
+
+    class Worker(StreamingModel):
+        async def stream(self, messages, tools=None, on_progress=None, **extra):
+            offered.append({t["function"]["name"] for t in tools or []})
+            return await super().stream(messages, tools, on_progress, **extra)
+
+    worker = Worker(call("request_tool", kind="github", reason="读 o/r 的 PR"),
+                    lambda m: call("github", args="pr list --repo o/r"),
+                    lambda m: call("report", state="ready", summary="看完了"))
+
+    async def main():
+        rt = agent_runtime(tmp_path / "home", router, worker, sources={"app": {"kind": "app"}},
+                           policy={"sources": {"app": {"allowed": [{"id": "me"}]}}}, api={"enabled": True, "port": 0})
+        rt.settings.ssh.admins = ["me"]
+        rt.integrations.gh = fake_gh(tmp_path)
+        me = {"Authorization": f"Bearer {rt.accounts.add('me')}"}
+        ctx = rt.sources["app"]
+        port, runner = await serve(rt)
+        said = lambda role: [m for m in ctx.kind.everything(ctx, "me") if m["role"] == role]  # noqa: E731
+        try:
+            from test_ssh import _until
+
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as c:
+                await c.post("/api/v1/threads/main/messages", headers=me, json={"text": "看看 o/r 的 PR"})
+                await _until(lambda: bool(said("credential")), timeout=10)
+                [card] = said("credential")
+                assert card["meta"] == {"kind": "github", "reason": "读 o/r 的 PR", "state": "waiting"}
+                assert "github" not in offered[0] and "request_tool" in offered[0]
+                # The person fills the card: straight to the server, not into the conversation.
+                saved = await c.put("/api/v1/integrations/github", headers=me, json={"token": "ghp_secret"})
+                assert saved.json()["test"]["ok"]
+                await _until(lambda: bool(said("reply")), timeout=10)
+                assert said("credential")[0]["meta"]["state"] == "connected"
+                assert all("ghp_secret" not in m["text"] for m in ctx.kind.everything(ctx, "me"))
+        finally:
+            runner.cancel()
+            await rt.close()
+
+    asyncio.run(main())
+    assert "github" in offered[1]  # offered as soon as it was connected, in the same turn

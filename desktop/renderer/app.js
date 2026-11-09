@@ -421,8 +421,48 @@
     if (render) renderMessages();
   }
 
+  // A worker asks the person to connect a tool: the form is right here, and what is typed goes to the server,
+  // never into the conversation.
+  const openForms = new Map();
+  function credential(m) {
+    const meta = m.meta || {};
+    const form = TOOL_FORMS[meta.kind] || { name: meta.kind, hint: '', fields: [] };
+    const item = el('li', 'msg proposal credential');
+    item.dataset.id = m.id;
+    const card = el('div', 'proposal-card');
+    const head = el('div', 'proposal-head');
+    head.append(icon('plug'), el('span', '', `需要你连接 ${form.name}`));
+    card.append(head);
+    if (meta.reason) card.append(el('p', 'credential-reason', `用来：${meta.reason}`));
+    if (meta.state === 'connected') {
+      card.append(el('span', 'decided connected', `已连接${meta.account ? `：${meta.account}` : ''}`));
+    } else if (state.opened === m.id) {
+      // The same form across redraws: the conversation redraws on every event, and what is typed must stay.
+      let filling = openForms.get(m.id);
+      if (!filling) {
+        filling = toolForm({ kind: meta.kind, connected: false, settings: {} }, form, (updated) => {
+          state.opened = null;
+          openForms.delete(m.id);
+          if (updated) meta.state = 'connected';
+          renderMessages();
+        });
+        openForms.set(m.id, filling);
+      }
+      card.append(filling);
+    } else {
+      const actions = el('div', 'actions');
+      const go = el('button', 'outline amber', '填写凭据');
+      go.addEventListener('click', () => { state.opened = m.id; renderMessages(); });
+      actions.append(go);
+      card.append(el('p', 'hint', '凭据直接存到服务器，不会出现在对话里，也不会发给模型。'), actions);
+    }
+    item.append(avatar(ASSISTANT, true), card, el('div', 'meta', time(m.at)));
+    return item;
+  }
+
   function message(m) {
     if (m.role === 'proposal') return proposal(m);
+    if (m.role === 'credential') return credential(m);
     const item = el('li', `msg ${m.role}`);
     item.dataset.id = m.id;
     const mine = m.role === 'user';
@@ -503,6 +543,7 @@
     shell: '运行命令', read_file: '读取文件', write_file: '写入文件', list_files: '查看目录',
     claude_code: '交给 Claude Code', codex: '交给 Codex', ssh: '远程命令', dispatch: '派出 Worker',
     github: 'GitHub', email: '邮箱', slack: 'Slack', google: 'Google', cloudflare: 'Cloudflare', godaddy: 'GoDaddy',
+    aws: 'AWS', request_tool: '请你连接工具',
   };
 
   function remember(details, key, fallback) {
@@ -554,7 +595,7 @@
     const summary = el('summary');
     // A step one of the lead's sub-workers took says which one.
     if (step.worker) summary.append(el('span', 'step-worker', step.worker));
-    const TOOL_STEPS = ['github', 'email', 'slack', 'google', 'cloudflare', 'godaddy'];
+    const TOOL_STEPS = ['github', 'email', 'slack', 'google', 'cloudflare', 'godaddy', 'aws', 'request_tool'];
     summary.append(icon(TOOL_STEPS.includes(step.name) ? 'plug' : STEP_NAMES[step.name] ? step.name : 'think'));
     if (step.name === 'think') {
       summary.append(el('span', 'step-name', `思考了 ${step.input || 1} 秒`));
@@ -984,6 +1025,7 @@
   const TOOL_NAMES = {
     claude_code: 'Claude Code', codex: 'Codex', ssh: '远程命令', shell: '本地命令', files: '文件操作',
     github: 'GitHub', email: '邮箱', slack: 'Slack', google: 'Google', cloudflare: 'Cloudflare', godaddy: 'GoDaddy',
+    aws: 'AWS',
   };
   const FILE_STEPS = new Set(['read_file', 'write_file', 'list_files']);
 
@@ -1126,6 +1168,9 @@
       fields: [['token', 'API 令牌', 'password']] },
     godaddy: { name: 'GoDaddy', hint: '在 developer.godaddy.com/keys 建一个 Production 的 API Key。',
       fields: [['key', 'API Key', 'password'], ['secret', 'API Secret', 'password']] },
+    aws: { name: 'AWS', hint: '在 AWS IAM 建一个用户（或用现有的），给它需要的权限（比如 EC2、S3、Route 53 的只读或管理），再建一个 Access Key。助理只用这把密钥，不用服务器自己的 AWS 身份。',
+      fields: [['access_key_id', 'Access Key ID', 'password'], ['secret_access_key', 'Secret Access Key', 'password'],
+        ['region', '默认区域', 'text']] },
   };
   const tools = { list: [], editing: null };
 
@@ -1159,7 +1204,13 @@
     if (t.settings && t.settings.address) row('邮箱', t.settings.address);
     if (t.settings && t.settings.client_email) row('服务账号', t.settings.client_email);
     if (detail.childNodes.length) box.append(detail);
-    if (tools.editing === t.kind) box.append(toolForm(t, form));
+    if (tools.editing === t.kind) {
+      box.append(toolForm(t, form, (updated) => {
+        if (updated) tools.list = tools.list.map((x) => (x.kind === t.kind ? updated : x));
+        tools.editing = null;
+        renderTools();
+      }));
+    }
     const foot = el('div', 'card-foot');
     const actions = el('div', 'actions');
     if (tools.editing !== t.kind) {
@@ -1197,7 +1248,7 @@
     return box;
   }
 
-  function toolForm(t, form) {
+  function toolForm(t, form, done) {
     const box = el('form', 'tool-form');
     box.noValidate = true;
     box.append(el('p', 'hint', form.hint));
@@ -1244,7 +1295,7 @@
     const actions = el('div', 'actions');
     const cancel = el('button', 'outline', '取消');
     cancel.type = 'button';
-    cancel.addEventListener('click', () => { tools.editing = null; renderTools(); });
+    cancel.addEventListener('click', () => done(null));
     const save = el('button', 'outline amber', '保存并测试');
     save.type = 'submit';
     actions.append(cancel, save);
@@ -1257,9 +1308,8 @@
       save.textContent = '测试中…';
       try {
         const updated = await call('toolSave', t.kind, fields);
-        tools.list = tools.list.map((x) => (x.kind === t.kind ? updated : x));
-        tools.editing = null;
-        renderTools();
+        if (!(updated.test || {}).ok) throw new Error((updated.test || {}).message || '没连上');
+        done(updated);
       } catch (err) {
         error.textContent = err.message;
         error.hidden = false;

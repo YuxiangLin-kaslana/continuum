@@ -284,11 +284,12 @@ def test_a_run_that_finished_its_turn_and_waits_for_no_one_is_closed_after_a_whi
             try:
                 await until(turned, timeout=15)
             except AssertionError:
-                # Seen only on CI: say what the ticket was like.
-                for t in rt.store.tickets.list():
-                    print("ticket:", t.model_dump_json(include={"stage", "ended", "attention", "assignments"})[:1500])
-                print("sessions:", {k: (s.busy, s.stopped) for k, s in rt.executor.sessions.items()})
-                raise
+                # Seen only on CI: say what the ticket was like, in the failure itself.
+                seen = [t.model_dump_json(include={"ended", "attention", "assignments"})[:600]
+                        for t in rt.store.tickets.list()]
+                raise AssertionError(f"no finished turn: tickets={seen} sessions="
+                                     f"{ {k[:8]: (s.busy, s.stopped) for k, s in rt.executor.sessions.items()} } "
+                                     f"messages={[m['role'] for m in ctx.kind.everything(ctx, 'me')]}") from None
             [ticket] = rt.store.tickets.list()
             assert ticket.ended is None
             rt._idle_at = 0
