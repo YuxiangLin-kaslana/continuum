@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('continuum', {
   approve: call('api:approve'),
   ssh: call('api:ssh'),
   tools: call('api:tools'),
+  agents: call('api:agents'),
+  agentSwitch: call('api:agentSwitch'),
   toolSave: call('api:toolSave'),
   toolTest: call('api:toolTest'),
   toolRemove: call('api:toolRemove'),

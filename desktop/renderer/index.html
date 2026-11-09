@@ -590,6 +590,8 @@ l-33 -150 -4 -901 -3 -902 25 -28 24 -29 291 0 c277 0 291 1 310 20 20 20 20
           <button id="tab-chat" role="tab" aria-selected="true" data-view="chat"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>对话</button>
           <span class="tab-sep" aria-hidden="true"></span>
           <button id="tab-projects" role="tab" aria-selected="false" data-view="projects"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="m3 13 9 5 9-5"/></svg>项目<span id="badge" class="badge" hidden></span></button>
+          <span class="tab-sep" aria-hidden="true"></span>
+          <button id="tab-tools" role="tab" aria-selected="false" data-view="tools"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3h4v3a2 2 0 1 0 4 0V3h3v7h-3a2 2 0 1 0 0 4h3v7h-7v-3a2 2 0 1 0-4 0v3H3v-7h3a2 2 0 1 0 0-4H3V3z"/></svg>工具</button>
         </nav>
         <div class="who">
           <span id="dot" class="dot" title="连接状态"></span>
@@ -652,54 +654,62 @@ l-33 -150 -4 -901 -3 -902 25 -28 24 -29 291 0 c277 0 291 1 310 20 20 20 20
         </div>
       </div>
 
+      <div id="view-tools" class="view tools-view" hidden>
+        <aside class="tools-list">
+          <div class="search-box"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><label for="tool-search" class="sr">搜索工具</label><input id="tool-search" type="search" placeholder="搜索工具" autocomplete="off" spellcheck="false"></div>
+          <ul id="tool-list" role="listbox" aria-label="工具"></ul>
+        </aside>
+        <section class="tool-detail">
+          <div id="tool-pane"></div>
+          <div id="ssh-pane" hidden>
+            <p id="ssh-locked" class="hint" hidden>只有管理员能管理 SSH 服务器。</p>
+            <div id="ssh-admin" hidden>
+              <article class="card notched keybox">
+                <div class="card-top"><span class="ticket-id" aria-hidden="true">KEY</span><span class="stage">Continuum 的公钥</span></div>
+                <code id="ssh-key" class="key"></code>
+                <p class="hint">把下面这行加到服务器上登录用户的 <code>~/.ssh/authorized_keys</code>，Continuum 就能用这把钥匙连它。</p>
+                <code id="ssh-line" class="key"></code>
+                <div class="card-foot">
+                  <span class="meta-item"><span id="ssh-fp"></span></span>
+                  <div class="actions"><button id="ssh-copy-key" class="outline" type="button">复制公钥</button><button id="ssh-copy-line" class="outline" type="button">复制这一行</button></div>
+                </div>
+              </article>
+              <div class="bulk-row">
+                <label for="ssh-bulk">全部服务器的执行权限</label>
+                <select id="ssh-bulk"></select>
+                <button id="ssh-bulk-apply" class="outline" type="button">应用到全部</button>
+              </div>
+              <p id="ssh-bulk-note" class="hint" hidden></p>
+              <div id="ssh-hosts"></div>
+              <div id="ssh-empty" class="empty" hidden>
+                <span class="en" aria-hidden="true">NO HOSTS YET</span>
+                <p>还没有服务器。点下面的“添加服务器”。</p>
+              </div>
+              <form id="ssh-form" class="card notched ssh-form" hidden novalidate>
+                <div class="card-top"><span class="ticket-id" aria-hidden="true">HOST</span><span id="ssh-form-title" class="stage">添加服务器</span></div>
+                <div class="form-grid">
+                  <label>名字<input id="ssh-name" required maxlength="40" spellcheck="false" placeholder="web1"></label>
+                  <label>登录用户<input id="ssh-user" required maxlength="64" spellcheck="false" placeholder="ubuntu"></label>
+                  <label class="wide">地址<input id="ssh-address" required maxlength="253" spellcheck="false" placeholder="IP 或域名"></label>
+                  <label>端口<input id="ssh-port" type="number" min="1" max="65535" value="22"></label>
+                  <label>经过跳板<select id="ssh-jump"><option value="">不用跳板，直接连</option></select></label>
+                  <label class="wide">执行权限<select id="ssh-approval"></select></label>
+                  <label class="wide">备注<input id="ssh-note" maxlength="200"></label>
+                </div>
+                <p id="ssh-error" class="error" role="alert" hidden></p>
+                <div class="card-foot"><div class="actions"><button id="ssh-cancel" class="outline" type="button">取消</button><button id="ssh-save" class="outline amber" type="submit">保存</button></div></div>
+              </form>
+              <button id="ssh-add" class="primary wide" type="button"><span>添加服务器</span></button>
+            </div>
+          </div>
+        </section>
+      </div>
+
       <div id="view-settings" class="view tickets settings" hidden>
         <div class="tickets-head"><h2 class="section-head"><span class="slash" aria-hidden="true">//</span><span class="en" aria-hidden="true">SETTINGS</span>设置</h2></div>
         <div class="group-row working"><h3 class="group">版本</h3><span class="en" aria-hidden="true">ABOUT</span></div>
         <div class="version-row"><p id="version" class="hint"></p><button id="check-update" class="outline" type="button">检测更新</button></div>
         <p id="update-result" class="hint" hidden></p>
-        <div class="group-row working"><h3 class="group">工具</h3><span class="en" aria-hidden="true">TOOLS</span></div>
-        <p class="hint">连上的工具，助理干活时就能用（由服务器代为调用，凭据只存在服务器上，不会再显示出来）。</p>
-        <div id="tools"></div>
-        <div class="group-row working"><h3 class="group">SSH 服务器</h3><span class="en" aria-hidden="true">SSH HOSTS</span></div>
-        <p id="ssh-locked" class="hint" hidden>只有管理员能管理 SSH 服务器。</p>
-        <div id="ssh-admin" hidden>
-          <article class="card notched keybox">
-            <div class="card-top"><span class="ticket-id" aria-hidden="true">KEY</span><span class="stage">Continuum 的公钥</span></div>
-            <code id="ssh-key" class="key"></code>
-            <p class="hint">把下面这行加到服务器上登录用户的 <code>~/.ssh/authorized_keys</code>，Continuum 就能用这把钥匙连它。</p>
-            <code id="ssh-line" class="key"></code>
-            <div class="card-foot">
-              <span class="meta-item"><span id="ssh-fp"></span></span>
-              <div class="actions"><button id="ssh-copy-key" class="outline" type="button">复制公钥</button><button id="ssh-copy-line" class="outline" type="button">复制这一行</button></div>
-            </div>
-          </article>
-          <div class="bulk-row">
-            <label for="ssh-bulk">全部服务器的执行权限</label>
-            <select id="ssh-bulk"></select>
-            <button id="ssh-bulk-apply" class="outline" type="button">应用到全部</button>
-          </div>
-          <p id="ssh-bulk-note" class="hint" hidden></p>
-          <div id="ssh-hosts"></div>
-          <div id="ssh-empty" class="empty" hidden>
-            <span class="en" aria-hidden="true">NO HOSTS YET</span>
-            <p>还没有服务器。点下面的“添加服务器”。</p>
-          </div>
-          <form id="ssh-form" class="card notched ssh-form" hidden novalidate>
-            <div class="card-top"><span class="ticket-id" aria-hidden="true">HOST</span><span id="ssh-form-title" class="stage">添加服务器</span></div>
-            <div class="form-grid">
-              <label>名字<input id="ssh-name" required maxlength="40" spellcheck="false" placeholder="web1"></label>
-              <label>登录用户<input id="ssh-user" required maxlength="64" spellcheck="false" placeholder="ubuntu"></label>
-              <label class="wide">地址<input id="ssh-address" required maxlength="253" spellcheck="false" placeholder="IP 或域名"></label>
-              <label>端口<input id="ssh-port" type="number" min="1" max="65535" value="22"></label>
-              <label>经过跳板<select id="ssh-jump"><option value="">不用跳板，直接连</option></select></label>
-              <label class="wide">执行权限<select id="ssh-approval"></select></label>
-              <label class="wide">备注<input id="ssh-note" maxlength="200"></label>
-            </div>
-            <p id="ssh-error" class="error" role="alert" hidden></p>
-            <div class="card-foot"><div class="actions"><button id="ssh-cancel" class="outline" type="button">取消</button><button id="ssh-save" class="outline amber" type="submit">保存</button></div></div>
-          </form>
-          <button id="ssh-add" class="primary wide" type="button"><span>添加服务器</span></button>
-        </div>
       </div>
 
       <div id="update" class="update" role="status" hidden><span id="update-text"></span><button id="update-install" class="outline amber" type="button" hidden>重启并更新</button></div>

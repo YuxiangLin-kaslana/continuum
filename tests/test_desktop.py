@@ -238,8 +238,12 @@ def test_the_settings_page_adds_tests_and_removes_ssh_servers():
         page.click("#connect")
         page.wait_for_selector("#main:not([hidden])")
 
-        page.click("#settings")
+        # The tools tab: every tool on the left, the chosen one on the right; SSH servers first.
+        page.click("#tab-tools")
         page.wait_for_selector("#ssh-admin:not([hidden])")
+        names = page.locator("#tool-list .tool-item b").all_inner_texts()
+        assert names[:3] == ["SSH 服务器", "Claude Code", "Codex"] and "AWS" in names and len(names) == 10
+        assert page.get_attribute("#tool-list [data-tool=ssh]", "aria-selected") == "true"
         assert page.inner_text("#ssh-key").startswith("ssh-ed25519 ")
         assert page.inner_text("#ssh-line").startswith('from="13.134.76.110",no-agent-forwarding')
         page.click("#ssh-copy-line")
@@ -280,32 +284,36 @@ def test_the_settings_page_adds_tests_and_removes_ssh_servers():
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-settings.png", full_page=True)
 
-        # The person's other tools: connect one, and its secret never shows again.
-        page.wait_for_selector(".card.tool[data-tool=github]")
-        assert page.locator(".card.tool").count() == 7
-        github = page.locator(".card.tool[data-tool=github]")
-        github.get_by_role("button", name="连接").click()
-        assert "Personal access tokens" in github.inner_text()
-        github.locator("input[type=password]").fill("ghp_secret")
-        github.get_by_role("button", name="保存并测试").click()
-        page.wait_for_selector(".card.tool.ok[data-tool=github]")
-        assert "YuxiangLin-kaslana" in page.inner_text(".card.tool[data-tool=github]")
+        # Another tool: connect it on its page, and its secret never shows again.
+        page.click("#tool-list [data-tool=github]")
+        assert page.is_hidden("#ssh-pane") and "Personal access tokens" in page.inner_text("#tool-pane")
+        assert "查 PR、issue" in page.inner_text("#tool-pane .tool-can")
+        page.fill("#tool-pane input[type=password]", "ghp_secret")
+        page.click("#tool-pane >> text=保存并测试")
+        page.wait_for_selector("#tool-list [data-tool=github].ready")
+        assert "YuxiangLin-kaslana" in page.inner_text("#tool-pane") and "已连接" in page.inner_text("#tool-list [data-tool=github]")
         assert "ghp_secret" not in page.content() and page.evaluate("window.__fake.savedTools.github.token") == "ghp_secret"
-        page.locator(".card.tool[data-tool=github]").get_by_role("button", name="修改").click()
-        assert page.get_attribute(".card.tool[data-tool=github] input[type=password]", "placeholder") == "已保存（留空不改）"
-        page.locator(".card.tool[data-tool=github]").get_by_role("button", name="取消").click()
-        email = page.locator(".card.tool[data-tool=email]")
-        email.get_by_role("button", name="连接").click()
-        assert email.locator("label", has_text="收信服务器").is_hidden()
-        email.locator("select").select_option("custom")
-        assert email.locator("label", has_text="收信服务器").is_visible()
-        email.get_by_role("button", name="取消").click()
-        off = page.locator(".card.tool[data-tool=github]").get_by_role("button", name="断开")
-        off.click()
-        page.locator(".card.tool[data-tool=github]").get_by_role("button", name="确认断开？").click()
-        page.wait_for_selector(".card.tool.untested[data-tool=github]")
+        assert page.get_attribute("#tool-pane input[type=password]", "placeholder") == "已保存（留空不改）"
+        page.click("#tool-list [data-tool=email]")
+        assert page.locator("#tool-pane label", has_text="收信服务器").is_hidden()
+        page.select_option("#tool-pane select", "custom")
+        assert page.locator("#tool-pane label", has_text="收信服务器").is_visible()
+        # A coding agent: who it is signed in as, and a switch.
+        page.click("#tool-list [data-tool=claude_code]")
+        assert "yuxiang.lin@o2tech.ai" in page.inner_text("#tool-pane")
+        page.click("#tool-pane >> text=停用")
+        page.wait_for_selector("#tool-list [data-tool=claude_code] >> text=已停用")
+        page.fill("#tool-search", "dns")
+        assert page.locator("#tool-list .tool-item b").all_inner_texts() == ["Cloudflare", "GoDaddy"]
+        page.fill("#tool-search", "")
         if SHOTS:
-            page.screenshot(path=f"{SHOTS}/desktop-tools.png", full_page=True)
+            page.screenshot(path=f"{SHOTS}/desktop-tools.png")
+        page.click("#tool-list [data-tool=github]")
+        page.click("#tool-pane >> text=断开")
+        page.click("#tool-pane >> text=确认断开？")
+        page.wait_for_selector("#tool-list [data-tool=github] >> text=没有连接")
+        page.click("#tool-list [data-tool=ssh]")
+        page.wait_for_selector("#ssh-admin:not([hidden])")
 
         # One choice for every server, asked twice.
         page.select_option("#ssh-bulk", "auto")
@@ -326,6 +334,7 @@ def test_the_settings_page_adds_tests_and_removes_ssh_servers():
         page.wait_for_selector(".card.host[data-host=andrew]", state="detached")
 
         # Logging in asked for updates once; the settings page asks again on request.
+        page.click("#settings")
         assert page.evaluate("window.__fake.checks") == 1
         page.click("#check-update")
         page.wait_for_selector("#update-result:not([hidden])")
@@ -344,8 +353,10 @@ def test_the_settings_page_adds_tests_and_removes_ssh_servers():
         page.click("#update-install")
         assert page.evaluate("window.__fake.installed") is True
 
+        # Settings keep only the version; the gear toggles back to the conversation.
+        assert page.locator("#view-settings #ssh-admin, #view-settings .tool-item").count() == 0
         page.click("#settings")
-        assert page.is_visible("#view-chat") and not page.is_visible("#view-settings")
+        assert page.is_visible("#view-chat")
         assert errors == []
         browser.close()
 

@@ -384,7 +384,10 @@ class AgentExecutor:
             raise LookupError(f"no model named {config.model!r}; add [models.{config.model}] to the settings")
         path = job.state_file(".agent.json") if hasattr(job, "state_file") else transcript_path(job.workdir)
         messages: list[dict[str, Any]] = _mend(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else []
-        delegates = config.delegates()
+        switches = getattr(ctx, "integrations", None)
+        # The coding agents the settings name, less any the person turned off on the tools page.
+        delegates = {k: v for k, v in config.delegates().items() if switches is None or switches.agent_enabled(k)}
+        job.delegates = delegates
         job.ssh = _ssh_for(ctx, job)
         job.projects = getattr(ctx, "projects", None)
         job.crew = getattr(ctx, "crew", None)
@@ -598,7 +601,7 @@ class AgentExecutor:
         """One sub-worker: the same tools as its lead for doing things, none for talking to the person."""
         sub = _Crewed(job, label, number, entry)
         model = job.model
-        delegates = config.delegates()
+        delegates = getattr(job, "delegates", None) or {}
         connected = job.integrations.connected() if getattr(job, "integrations", None) else set()
         tools = [*TOOLS[:4], *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
                  *(t for kind in INTEGRATION_TOOLS if kind in connected for t in INTEGRATION_TOOLS[kind]), FINISH]
@@ -682,7 +685,7 @@ class AgentExecutor:
                 entries = sorted(p.name + ("/" if p.is_dir() else "") for p in target.iterdir())
                 return "\n".join(entries) or "（空）", False
             if name in DELEGATE_TOOLS:
-                delegate_config = config.delegates().get(name)
+                delegate_config = (getattr(job, "delegates", None) or config.delegates()).get(name)
                 if delegate_config is None:
                     return f"错误：没有配置 {name}", False
                 answer = await cli_agents.delegate(name, delegate_config, job, str(args.get("task", "")),

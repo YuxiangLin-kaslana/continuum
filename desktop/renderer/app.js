@@ -288,16 +288,15 @@
     $('view-chat').hidden = view !== 'chat';
     $('view-projects').hidden = view !== 'projects';
     $('view-settings').hidden = view !== 'settings';
+    $('view-tools').hidden = view !== 'tools';
+    if (view === 'tools') loadToolsTab();
     $('settings').setAttribute('aria-pressed', String(view === 'settings'));
     if (view === 'projects') showProjectsTab();
     if (view === 'chat') {
       renderMessages(true);
       $('input').focus();
     }
-    if (view === 'settings') {
-      loadSsh();
-      loadTools();
-    }
+
   }
 
   // The projects tab: the list of projects or of workers, or one project with its own part of the conversation.
@@ -1172,82 +1171,6 @@
       fields: [['access_key_id', 'Access Key ID', 'password'], ['secret_access_key', 'Secret Access Key', 'password'],
         ['region', '默认区域', 'text']] },
   };
-  const tools = { list: [], editing: null };
-
-  async function loadTools() {
-    if (!api.tools) return;
-    let page;
-    try {
-      page = await call('tools');
-    } catch (error) {
-      showStatus(error.message);
-      return;
-    }
-    tools.list = page.admin ? page.tools : [];
-    renderTools();
-  }
-
-  function toolCard(t) {
-    const form = TOOL_FORMS[t.kind];
-    const test = t.test || {};
-    const kind = !t.connected ? 'untested' : test.ok === false ? 'bad' : 'ok';
-    const box = el('article', `card notched host tool ${kind}`);
-    box.dataset.tool = t.kind;
-    const top = el('div', 'card-top');
-    top.append(el('span', 'ticket-id', t.kind.toUpperCase()),
-      el('span', 'stage', !t.connected ? '没有连接' : test.ok === false ? '连不上' : '已连接'));
-    box.append(top, el('div', 'card-title', form.name));
-    const detail = el('dl', 'detail');
-    const row = (label, value, cls = '') => { if (value) detail.append(el('dt', '', label), el('dd', cls, value)); };
-    row('账号', t.account);
-    if (test.message && test.ok === false) row('上次测试', test.message, 'question');
-    if (t.settings && t.settings.address) row('邮箱', t.settings.address);
-    if (t.settings && t.settings.client_email) row('服务账号', t.settings.client_email);
-    if (detail.childNodes.length) box.append(detail);
-    if (tools.editing === t.kind) {
-      box.append(toolForm(t, form, (updated) => {
-        if (updated) tools.list = tools.list.map((x) => (x.kind === t.kind ? updated : x));
-        tools.editing = null;
-        renderTools();
-      }));
-    }
-    const foot = el('div', 'card-foot');
-    const actions = el('div', 'actions');
-    if (tools.editing !== t.kind) {
-      const open = el('button', t.connected ? 'outline' : 'outline amber', t.connected ? '修改' : '连接');
-      open.addEventListener('click', () => { tools.editing = t.kind; renderTools(); });
-      actions.append(open);
-    }
-    if (t.connected) {
-      const again = el('button', 'outline', '测试');
-      again.addEventListener('click', async () => {
-        again.disabled = true;
-        try {
-          const updated = await call('toolTest', t.kind);
-          tools.list = tools.list.map((x) => (x.kind === t.kind ? updated : x));
-          renderTools();
-        } catch (error) {
-          showStatus(error.message);
-          again.disabled = false;
-        }
-      });
-      const off = el('button', 'outline danger', '断开');
-      off.addEventListener('click', async () => {
-        if (!off.dataset.confirm) { off.dataset.confirm = '1'; off.textContent = '确认断开？'; return; }
-        try {
-          await call('toolRemove', t.kind);
-          await loadTools();
-        } catch (error) {
-          showStatus(error.message);
-        }
-      });
-      actions.append(again, off);
-    }
-    foot.append(actions);
-    box.append(foot);
-    return box;
-  }
-
   function toolForm(t, form, done) {
     const box = el('form', 'tool-form');
     box.noValidate = true;
@@ -1320,8 +1243,207 @@
     return box;
   }
 
-  function renderTools() {
-    $('tools').replaceChildren(...tools.list.map(toolCard));
+  // --- the tools page: every tool on the left, the chosen one on the right, like an editor's extensions ---
+
+  const CATALOG = [
+    { id: 'ssh', group: '服务器', name: 'SSH 服务器', abbr: 'SSH', color: '#3aa9ac',
+      desc: '助理在你登记的服务器上执行命令、看服务和日志；每台服务器连通后会自动巡检。',
+      can: ['列出服务器和它们的概况', '在服务器上执行命令（按每台的执行权限）', '负责人同时派多个 Worker 分别查多台机器'] },
+    { id: 'claude_code', group: '编程助手', name: 'Claude Code', abbr: 'CC', color: '#d97757',
+      desc: '用你自己的 Claude 账号，在项目的工作区里写代码、改代码、调试。',
+      can: ['写或改较多代码', '读懂一个项目', '调试、跑测试'] },
+    { id: 'codex', group: '编程助手', name: 'Codex', abbr: 'CX', color: '#10a37f',
+      desc: '用你自己的 ChatGPT 账号，在项目的工作区里写代码、改代码、调试。',
+      can: ['写或改较多代码', '读懂一个项目', '调试、跑测试'] },
+    { id: 'github', group: '服务', name: 'GitHub', abbr: 'GH', color: '#8b949e',
+      desc: '用你的令牌执行 gh 命令。', can: ['查 PR、issue、提交、Actions', '评论、开 issue（你明确要求时）'] },
+    { id: 'email', group: '服务', name: '邮箱', abbr: '@', color: '#f2a33a',
+      desc: '用 IMAP / SMTP 读写你的邮箱。', can: ['搜索、阅读邮件', '发邮件（你明确要求时）'] },
+    { id: 'slack', group: '服务', name: 'Slack', abbr: 'SL', color: '#b05ce6',
+      desc: '用机器人令牌调用 Slack Web API。', can: ['读频道和消息', '发消息（你明确要求时）'] },
+    { id: 'google', group: '服务', name: 'Google（GCP / Drive / Docs）', abbr: 'G', color: '#4285f4',
+      desc: '用服务账号执行 gcloud，调用 Drive、Docs、Sheets、Cloud 的接口。',
+      can: ['管 Google Cloud 的资源', '读写共享给服务账号的 Drive、Docs、Sheets'] },
+    { id: 'cloudflare', group: '服务', name: 'Cloudflare', abbr: 'CF', color: '#f38020',
+      desc: '用 API 令牌调用 Cloudflare 的接口。', can: ['查看域名和 DNS 记录', '改 DNS 记录（你明确要求时）'] },
+    { id: 'godaddy', group: '服务', name: 'GoDaddy', abbr: 'GD', color: '#1bdbdb',
+      desc: '用 API Key 调用 GoDaddy 的接口。', can: ['查看域名和 DNS 记录', '改 DNS 记录（你明确要求时）'] },
+    { id: 'aws', group: '服务', name: 'AWS', abbr: 'AWS', color: '#ff9900',
+      desc: '用你给的 Access Key 执行 aws 命令，不用服务器自己的 AWS 身份。',
+      can: ['查 EC2、S3、Route 53 等资源', '改资源（你明确要求、且密钥有权限时）'] },
+  ];
+  const toolsTab = { selected: 'ssh', integrations: [], agents: [], hosts: [], admin: true };
+
+  async function loadToolsTab() {
+    const [integrations, agents, sshPage] = await Promise.all([
+      api.tools ? call('tools').catch(() => ({ admin: false, tools: [] })) : { admin: false, tools: [] },
+      api.agents ? call('agents').catch(() => []) : [],
+      call('ssh').catch(() => ({ admin: false, hosts: [] })),
+    ]);
+    toolsTab.admin = integrations.admin || sshPage.admin;
+    toolsTab.integrations = integrations.tools || [];
+    toolsTab.agents = agents || [];
+    toolsTab.hosts = sshPage.hosts || [];
+    renderToolList();
+    renderToolDetail();
+  }
+
+  // Where a tool stands, in a few words, and whether it is ready.
+  function toolStatus(id) {
+    if (id === 'ssh') {
+      const ok = toolsTab.hosts.filter((h) => (h.state || {}).ok).length;
+      return { ready: ok > 0, text: toolsTab.hosts.length ? `${ok}/${toolsTab.hosts.length} 台已连通` : '还没有服务器' };
+    }
+    const agent = toolsTab.agents.find((a) => a.kind === id);
+    if (agent || id === 'claude_code' || id === 'codex') {
+      if (!agent || !agent.installed) return { ready: false, text: '服务器上没装' };
+      if (!agent.signed_in) return { ready: false, text: '没登录' };
+      return { ready: agent.enabled, text: agent.enabled ? '已启用' : '已停用' };
+    }
+    const t = toolsTab.integrations.find((x) => x.kind === id) || {};
+    if (!t.connected) return { ready: false, text: '没有连接' };
+    if ((t.test || {}).ok === false) return { ready: false, text: '连不上' };
+    return { ready: true, text: '已连接' };
+  }
+
+  function toolIcon(entry) {
+    const mark = el('span', 'tool-icon', entry.abbr);
+    mark.style.setProperty('--c', entry.color);
+    mark.setAttribute('aria-hidden', 'true');
+    return mark;
+  }
+
+  function renderToolList() {
+    const query = $('tool-search').value.trim().toLowerCase();
+    const shown = CATALOG.filter((e) => !query || `${e.name} ${e.desc} ${e.id} ${e.can.join(" ")}`.toLowerCase().includes(query));
+    const items = [];
+    for (const group of ['服务器', '编程助手', '服务']) {
+      const members = shown.filter((e) => e.group === group);
+      if (!members.length) continue;
+      items.push(el('li', 'side-head', group));
+      for (const entry of members) {
+        const status = toolStatus(entry.id);
+        const li = el('li');
+        const button = el('button', `tool-item${status.ready ? ' ready' : ''}`);
+        button.dataset.tool = entry.id;
+        button.setAttribute('role', 'option');
+        button.setAttribute('aria-selected', String(entry.id === toolsTab.selected));
+        const words = el('span', 'tool-words');
+        words.append(el('b', '', entry.name), el('span', 'tool-state', status.text));
+        button.append(toolIcon(entry), words, el('span', `tool-dot${status.ready ? ' on' : ''}`));
+        button.addEventListener('click', () => { toolsTab.selected = entry.id; renderToolList(); renderToolDetail(); });
+        li.append(button);
+        items.push(li);
+      }
+    }
+    if (!items.length) items.push(el('li', 'hint', '没有找到。'));
+    $('tool-list').replaceChildren(...items);
+  }
+  $('tool-search').addEventListener('input', renderToolList);
+
+  function renderToolDetail() {
+    const entry = CATALOG.find((e) => e.id === toolsTab.selected) || CATALOG[0];
+    const isSsh = entry.id === 'ssh';
+    $('ssh-pane').hidden = !isSsh;
+    const pane = $('tool-pane');
+    const status = toolStatus(entry.id);
+    const head = el('div', 'tool-head');
+    const titles = el('div', 'tool-titles');
+    titles.append(el('h2', '', entry.name), el('span', `tool-pill${status.ready ? ' on' : ''}`, status.text));
+    head.append(toolIcon(entry), titles);
+    const nodes = [head, el('p', 'tool-desc', entry.desc)];
+    const can = el('ul', 'tool-can');
+    can.append(...entry.can.map((c) => el('li', '', c)));
+    nodes.push(el('h3', 'tool-sub', '助理能用它做'), can);
+    if (!toolsTab.admin) {
+      nodes.push(el('p', 'hint', '只有管理员能管理工具。'));
+    } else if (isSsh) {
+      loadSsh();
+    } else if (entry.id === 'claude_code' || entry.id === 'codex') {
+      nodes.push(...agentDetail(entry));
+    } else {
+      nodes.push(...integrationDetail(entry));
+    }
+    pane.replaceChildren(...nodes);
+  }
+
+  function agentDetail(entry) {
+    const agent = toolsTab.agents.find((a) => a.kind === entry.id) || {};
+    const detail = el('dl', 'detail');
+    const row = (label, value) => { if (value) detail.append(el('dt', '', label), el('dd', '', value)); };
+    row('服务器上', agent.installed || '没装');
+    row('登录的账号', agent.signed_in ? agent.account || '已登录' : '没登录');
+    row('设置里', agent.configured ? '已配置给助理' : '没配置（服务器设置里加 [executor.config.' + entry.id + ']）');
+    const nodes = [el('h3', 'tool-sub', '状态'), detail];
+    if (!agent.signed_in) {
+      nodes.push(el('p', 'hint', entry.id === 'claude_code'
+        ? '登录要在服务器上进行：运行 claude setup-token（或 claude auth login），用你的 Claude 账号确认。'
+        : '登录要在服务器上进行：运行 codex login --device-auth，按提示在浏览器里确认。'));
+    }
+    const actions = el('div', 'actions');
+    const toggle = el('button', agent.enabled ? 'outline danger' : 'outline amber', agent.enabled ? '停用' : '启用');
+    toggle.addEventListener('click', async () => {
+      toggle.disabled = true;
+      try {
+        const updated = await call('agentSwitch', entry.id, !agent.enabled);
+        toolsTab.agents = toolsTab.agents.map((a) => (a.kind === entry.id ? updated : a));
+        renderToolList();
+        renderToolDetail();
+      } catch (error) {
+        showStatus(error.message);
+        toggle.disabled = false;
+      }
+    });
+    actions.append(toggle);
+    nodes.push(el('p', 'hint', agent.enabled ? '启用时，助理遇到较大的编程活会交给它。' : '停用后，助理不会再把活交给它。'), actions);
+    return nodes;
+  }
+
+  function integrationDetail(entry) {
+    const t = toolsTab.integrations.find((x) => x.kind === entry.id) || { kind: entry.id, connected: false, settings: {} };
+    const form = TOOL_FORMS[entry.id];
+    const nodes = [];
+    const test = t.test || {};
+    if (t.connected) {
+      const detail = el('dl', 'detail');
+      const row = (label, value, cls = '') => { if (value) detail.append(el('dt', '', label), el('dd', cls, value)); };
+      row('账号', t.account);
+      if (t.settings && t.settings.address) row('邮箱', t.settings.address);
+      if (t.settings && t.settings.client_email) row('服务账号', t.settings.client_email);
+      if (test.at) row('上次测试', `${test.ok ? '通过' : test.message}（${day(test.at)} ${time(test.at)}）`, test.ok ? '' : 'question');
+      const actions = el('div', 'actions');
+      const again = el('button', 'outline', '测试');
+      again.addEventListener('click', async () => {
+        again.disabled = true;
+        try {
+          const updated = await call('toolTest', entry.id);
+          toolsTab.integrations = toolsTab.integrations.map((x) => (x.kind === entry.id ? updated : x));
+        } catch (error) {
+          showStatus(error.message);
+        }
+        renderToolList();
+        renderToolDetail();
+      });
+      const off = el('button', 'outline danger', '断开');
+      off.addEventListener('click', async () => {
+        if (!off.dataset.confirm) { off.dataset.confirm = '1'; off.textContent = '确认断开？'; return; }
+        try {
+          await call('toolRemove', entry.id);
+        } catch (error) {
+          showStatus(error.message);
+        }
+        await loadToolsTab();
+      });
+      actions.append(again, off);
+      nodes.push(el('h3', 'tool-sub', '状态'), detail, actions);
+    }
+    nodes.push(el('h3', 'tool-sub', t.connected ? '修改凭据' : '连接'));
+    nodes.push(toolForm(t, form, async (updated) => {
+      if (updated) toolsTab.integrations = toolsTab.integrations.map((x) => (x.kind === entry.id ? updated : x));
+      renderToolList();
+      renderToolDetail();
+    }));
+    return nodes;
   }
 
   // --- settings: the SSH servers Continuum may reach ---

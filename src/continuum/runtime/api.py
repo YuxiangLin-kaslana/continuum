@@ -7,6 +7,7 @@ only their own conversations and the tickets started from them.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 from datetime import UTC, datetime, timedelta
@@ -19,6 +20,8 @@ from pydantic import BaseModel, Field, ValidationError
 from continuum.core.errors import UserError
 from continuum.core.model import ActorRef, Ticket
 from continuum.core.stage import can_retry, ticket_stage
+
+from continuum.plugins.cli_agents import resolve
 
 from .integrations import EMAIL_PRESETS, IntegrationError
 from .projects import project_of_thread
@@ -467,6 +470,51 @@ def create_app(rt: Runtime) -> FastAPI:
             return {"removed": rt.integrations.remove(kind)}
         except IntegrationError as error:
             raise HTTPException(404, str(error)) from None
+
+    # --- the coding agents workers hand work to: whether each is there, signed in, and switched on ---
+
+    AGENT_CHECK = {"claude_code": ["auth", "status"], "codex": ["login", "status"]}
+
+    async def agent_status(kind: str) -> dict[str, Any]:
+        config = rt.executor.context.config
+        configured = getattr(config, kind, None) if hasattr(config, "delegates") else None
+        command = configured.command if configured is not None else ("claude" if kind == "claude_code" else "codex")
+        found = resolve(command)
+        status = {"kind": kind, "configured": configured is not None, "installed": found,
+                  "enabled": rt.integrations.agent_enabled(kind), "account": None, "signed_in": False}
+        if found:
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    found, *AGENT_CHECK[kind], stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT)
+                output = (await asyncio.wait_for(process.communicate(), timeout=20))[0].decode("utf-8", "replace")
+            except (OSError, TimeoutError):
+                output = ""
+            if kind == "claude_code":
+                try:
+                    data = json.loads(output)
+                    status["signed_in"] = bool(data.get("loggedIn"))
+                    status["account"] = " · ".join(str(x) for x in (data.get("email"), data.get("subscriptionType"))
+                                                   if x)
+                except ValueError:
+                    pass
+            else:
+                status["signed_in"] = "logged in" in output.lower()
+                status["account"] = output.strip().splitlines()[0][:120] if output.strip() else None
+        return status
+
+    @app.get("/api/v1/agents")
+    async def agents(user: str = Depends(user_of)) -> list[dict[str, Any]]:
+        ssh_admin(user)
+        return list(await asyncio.gather(*(agent_status(k) for k in AGENT_CHECK)))
+
+    @app.post("/api/v1/agents/{kind}")
+    async def switch_agent(kind: str, body: dict[str, Any], user: str = Depends(user_of)) -> dict[str, Any]:
+        ssh_admin(user)
+        if kind not in AGENT_CHECK:
+            raise HTTPException(404, "没有这个编程助手")
+        rt.integrations.set_agent_enabled(kind, bool(body.get("enabled")))
+        return await agent_status(kind)
 
     @app.post("/api/v1/approvals/{ticket_id}/{key}")
     async def approve(ticket_id: str, key: str, body: ApprovalRequest, user: str = Depends(user_of)) \

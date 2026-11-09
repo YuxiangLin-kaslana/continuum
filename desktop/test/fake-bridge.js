@@ -47,6 +47,12 @@
   ];
   const steps = [];
   const approvals = {};
+  const agentList = [
+    { kind: 'claude_code', configured: true, installed: '/home/u/.npm-global/bin/claude', enabled: true,
+      signed_in: true, account: 'yuxiang.lin@o2tech.ai · max' },
+    { kind: 'codex', configured: true, installed: '/home/u/.npm-global/bin/codex', enabled: true, signed_in: true,
+      account: 'Logged in using ChatGPT' },
+  ];
   const toolList = ['github', 'email', 'slack', 'google', 'cloudflare', 'godaddy', 'aws']
     .map((kind) => ({ kind, connected: false, account: null, settings: {}, test: null }));
   let nextStep = 1;
@@ -291,6 +297,12 @@
         test: { ok: true, message: '已连接', at: now() } });
       window.__fake.savedTools = { ...(window.__fake.savedTools || {}), [kind]: fields };
       return ok({ ...t });
+    },
+    agents: () => ok(agentList.map((a) => ({ ...a }))),
+    agentSwitch: (kind, enabled) => {
+      const a = agentList.find((x) => x.kind === kind);
+      a.enabled = enabled;
+      return ok({ ...a });
     },
     toolTest: (kind) => ok({ ...toolList.find((x) => x.kind === kind) }),
     toolRemove: (kind) => {

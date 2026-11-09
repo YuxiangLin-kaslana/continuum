@@ -99,6 +99,19 @@ class Integrations:
                 text = text.replace(value, "***")
         return text
 
+    # --- switches for the coding agents a worker may hand work to (Claude Code, Codex): on unless turned off ---
+
+    def agent_enabled(self, kind: str) -> bool:
+        path = self.folder / "agents.json"
+        return bool(json.loads(path.read_text(encoding="utf-8")).get(kind, True)) if path.exists() else True
+
+    def set_agent_enabled(self, kind: str, enabled: bool) -> None:
+        path = self.folder / "agents.json"
+        found = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        found[kind] = bool(enabled)
+        self.folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path.write_text(json.dumps(found), encoding="utf-8")
+
     def connected(self) -> set[str]:
         return {k for k in KINDS if (self.get(k) or {}).get("secrets")}
 

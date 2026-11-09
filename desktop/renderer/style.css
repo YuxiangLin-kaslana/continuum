@@ -490,3 +490,35 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 .credential .credential-reason { margin: 0; color: var(--soft); font-size: 13px; }
 .credential .decided.connected { color: var(--teal); font-size: 12.5px; }
 .credential .tool-form { margin-top: 4px; }
+
+/* --- the tools page: a list on the left, the chosen tool on the right --- */
+.tools-view:not([hidden]) { display: grid; grid-template-columns: minmax(168px, 32%) minmax(0, 1fr); min-height: 0; }
+.tools-list { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; padding: 10px 0 0; }
+.tools-list .search-box { margin: 0 10px 8px; }
+#tool-list { list-style: none; margin: 0; padding: 0 6px 12px; overflow-y: auto; overflow-x: hidden; display: grid; gap: 2px; align-content: start; }
+#tool-list .side-head { padding: 10px 8px 4px; font-size: 11px; letter-spacing: 0.12em; color: var(--dim); }
+.tool-item { width: 100%; display: flex; align-items: center; gap: 10px; border: 0; border-left: 2px solid transparent; background: transparent; color: var(--soft); padding: 8px 8px; text-align: left; cursor: pointer; min-width: 0; }
+.tool-item:hover { background: var(--panel-2); }
+.tool-item[aria-selected="true"] { background: var(--teal-bg); border-left-color: var(--teal); color: var(--ink); }
+.tool-icon { flex: none; width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--c); color: var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); font-size: 11px; font-weight: 700; letter-spacing: 0.02em; }
+.tool-words { flex: 1; min-width: 0; display: grid; }
+.tool-words b { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-state { font-size: 11.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); }
+.tool-dot.on { background: var(--teal); box-shadow: 0 0 6px rgba(95, 211, 209, 0.6); }
+.tool-detail { overflow-y: auto; overflow-x: hidden; padding: 16px 18px 24px; min-width: 0; }
+.tool-head { display: flex; align-items: center; gap: 14px; }
+.tool-head .tool-icon { width: 52px; height: 52px; font-size: 16px; }
+.tool-titles { display: grid; gap: 4px; min-width: 0; }
+.tool-titles h2 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+.tool-pill { justify-self: start; font-size: 11.5px; padding: 1px 8px; border: 1px solid var(--line-2); color: var(--dim); }
+.tool-pill.on { border-color: var(--teal-line); color: var(--teal); }
+.tool-desc { color: var(--soft); margin: 12px 0 4px; line-height: 1.6; }
+.tool-sub { font-size: 12px; letter-spacing: 0.1em; color: var(--dim); margin: 16px 0 6px; font-weight: 600; }
+.tool-can { margin: 0; padding-left: 18px; color: var(--soft); font-size: 13px; line-height: 1.7; }
+.tool-detail .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+#ssh-pane { margin-top: 8px; }
+@media (max-width: 400px) {
+  .tools-view:not([hidden]) { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .tools-list { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; }
+}
