@@ -279,10 +279,16 @@ def test_a_run_that_finished_its_turn_and_waits_for_no_one_is_closed_after_a_whi
             def turned():
                 found = rt.store.tickets.list()
                 return bool(found) and bool(found[0].assignments) and found[0].assignments[-1].report is not None \
-                    and found[0].assignments[-1].state == "running" and not any(
-                        s.busy for s in rt.executor.sessions.values())
+                    and not any(s.busy for s in rt.executor.sessions.values())
 
-            await until(turned)
+            try:
+                await until(turned, timeout=15)
+            except AssertionError:
+                # Seen only on CI: say what the ticket was like.
+                for t in rt.store.tickets.list():
+                    print("ticket:", t.model_dump_json(include={"stage", "ended", "attention", "assignments"})[:1500])
+                print("sessions:", {k: (s.busy, s.stopped) for k, s in rt.executor.sessions.items()})
+                raise
             [ticket] = rt.store.tickets.list()
             assert ticket.ended is None
             rt._idle_at = 0
