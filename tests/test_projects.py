@@ -83,7 +83,7 @@ def test_a_worker_proposes_a_project_the_person_confirms_and_it_reminds_and_runs
                 for schedule in project.schedules:
                     schedule.next_at = datetime.now(UTC) - timedelta(seconds=1)
                 rt.projects._save(project)
-                rt._clock_at = 0
+                rt._clock_at = None
                 rt._tick_projects()
                 [reminder] = said("reminder")
                 assert reminder["thread"] == "main" and reminder["text"] == "记得看巡检结果"
@@ -97,7 +97,7 @@ def test_a_worker_proposes_a_project_the_person_confirms_and_it_reminds_and_runs
                 assert "只读检查，超过 80% 提醒我" in worker.seen[2][1]["content"]
                 # Planned again for tomorrow, not fired twice.
                 assert all(s.next_at > datetime.now(UTC) for s in rt.projects.get(project_id).schedules)
-                rt._clock_at = 0
+                rt._clock_at = None
                 rt._tick_projects()
                 assert len(said("reminder")) == 1
 

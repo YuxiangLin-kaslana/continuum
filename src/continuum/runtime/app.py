@@ -86,8 +86,11 @@ class Runtime:
             self.accounts = Accounts(self.store)
             self.ssh = SshHosts(self.store, self.home, self.settings.ssh)
             self.projects = Projects(self.store, self.home)
-            self._clock_at = 0.0
-            self._profiles_at = 0.0
+            # When each periodic check last ran (time.monotonic(), which counts from boot): None until the first,
+            # so a host started minutes ago does not wait out an interval it never began.
+            self._clock_at: float | None = None
+            self._profiles_at: float | None = None
+            self._idle_at: float | None = None
             self._surveying: set[str] = set()
             self._wake = asyncio.Event()
             self.effects = Effects(self.store, on_enqueue=self.poke)
@@ -333,7 +336,7 @@ class Runtime:
         """A run that finished its turn without ending, waits for no one and has been quiet for a while is done:
         it is closed, so it does not show as running for days. A later message still finds it, and opens it again."""
         now = time.monotonic()
-        if now - getattr(self, "_idle_at", 0.0) < 600:
+        if self._idle_at is not None and now - self._idle_at < 600:
             return
         self._idle_at = now
         quiet = datetime.now(UTC) - self.IDLE_CLOSE
@@ -353,7 +356,7 @@ class Runtime:
     def _tick_profiles(self) -> None:
         """Once an hour, look again at reachable servers whose profile is more than a day old (a few at a time)."""
         now = time.monotonic()
-        if now - self._profiles_at < 3600:
+        if self._profiles_at is not None and now - self._profiles_at < 3600:
             return
         self._profiles_at = now
         stale = datetime.now(UTC) - timedelta(days=1)
@@ -374,7 +377,7 @@ class Runtime:
     def _tick_projects(self) -> None:
         """What the projects' schedules make due: a reminder in the person's conversation, or a run of the project."""
         now = time.monotonic()
-        if now - self._clock_at < 5:
+        if self._clock_at is not None and now - self._clock_at < 5:
             return
         self._clock_at = now
         ctx = self.app_source()

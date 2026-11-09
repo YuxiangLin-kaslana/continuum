@@ -292,13 +292,13 @@ def test_a_run_that_finished_its_turn_and_waits_for_no_one_is_closed_after_a_whi
                                      f"messages={[m['role'] for m in ctx.kind.everything(ctx, 'me')]}") from None
             [ticket] = rt.store.tickets.list()
             assert ticket.ended is None
-            rt._idle_at = 0
+            rt._idle_at = None
             rt._tick_idle()
             assert rt.store.tickets.get(ticket.id).ended is None  # quiet, but not for long yet
             rt.IDLE_CLOSE = __import__("datetime").timedelta(seconds=0)
 
             def closed():
-                rt._idle_at = 0
+                rt._idle_at = None
                 rt._tick_idle()
                 return rt.store.tickets.get(ticket.id).ended is not None
 
@@ -314,3 +314,18 @@ def test_a_run_that_finished_its_turn_and_waits_for_no_one_is_closed_after_a_whi
             await rt.close()
 
     asyncio.run(main())
+
+
+def test_periodic_checks_run_at_once_on_a_host_that_has_just_booted(tmp_path, monkeypatch):
+    # time.monotonic() counts from boot: on a machine up for a minute, an interval measured from 0 never passed.
+    rt = app_runtime(tmp_path)
+    monkeypatch.setattr("continuum.runtime.app.time.monotonic", lambda: 60.0)
+    seen = []
+    monkeypatch.setattr(rt.projects, "due", lambda now: seen.append("projects") or [])
+    monkeypatch.setattr(rt.ssh, "list", lambda: seen.append("profiles") or [])
+    monkeypatch.setattr(rt.store.tickets, "open", lambda: seen.append("idle") or [])
+    rt._tick_projects()
+    rt._tick_profiles()
+    rt._tick_idle()
+    assert seen == ["projects", "profiles", "idle"]
+    asyncio.run(rt.close())
