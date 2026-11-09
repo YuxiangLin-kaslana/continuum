@@ -380,6 +380,27 @@ def test_a_desktop_conversation_shows_the_steps_and_the_answer_as_it_is_written(
     assert any(e["type"] == "thinking" for e in events) and events[-1]["type"] != "thinking"
 
 
+def test_a_model_that_fails_leaves_the_ticket_waiting_for_the_person(tmp_path):
+    class Broken(ScriptedModel):
+        async def complete(self, messages, tools=None, tool_choice=None, **extra):
+            raise ModelError("HTTP 400: bad request")
+
+    router = ScriptedModel(call("decide", decision="accept", title="x", scope="x", reason="r"))
+
+    async def main():
+        rt = agent_runtime(tmp_path, router, Broken())
+        try:
+            post(tmp_path, "做点事")
+            await drive(rt, lambda: bool(rt.store.tickets.list()) and rt.store.tickets.list()[0].attention is not None,
+                        timeout=10)
+            [ticket] = rt.store.tickets.list()
+            assert "回复一句可以让我再试" in ticket.attention.question
+        finally:
+            await rt.close()
+
+    asyncio.run(main())
+
+
 def test_a_transcript_cut_off_while_tools_ran_is_mended_before_it_goes_back_to_the_model():
     from continuum.plugins.agent_executor import _mend
 

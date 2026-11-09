@@ -300,6 +300,7 @@ class Runtime:
         await self.effects.run_due(wait=False)
         self._tick_projects()
         self._tick_profiles()
+        self._tick_idle()
 
     # --- what runs on each server ---
 
@@ -322,6 +323,29 @@ class Runtime:
         task = asyncio.create_task(work(), name=f"survey-{name}")
         self._tasks.append(task)
         task.add_done_callback(lambda t: self._tasks.remove(t) if t in self._tasks else None)
+
+    IDLE_CLOSE = timedelta(hours=2)
+
+    def _tick_idle(self) -> None:
+        """A run that finished its turn without ending, waits for no one and has been quiet for a while is done:
+        it is closed, so it does not show as running for days. A later message still finds it, and opens it again."""
+        now = time.monotonic()
+        if now - getattr(self, "_idle_at", 0.0) < 600:
+            return
+        self._idle_at = now
+        quiet = datetime.now(UTC) - self.IDLE_CLOSE
+        for ticket in self.store.tickets.open():
+            session = self.executor.sessions.get(ticket.id)
+            if ticket.attention is not None or (session is not None and session.busy) or ticket.updated_at > quiet:
+                continue
+            running = [a for a in ticket.assignments if a.state == "running"]
+            if not running:
+                continue
+            try:
+                self.engine.stop_ticket(ticket.id, "做完一轮后空闲超过 2 小时，自动归档")
+                log.info("closed idle ticket %s", ticket.id[:8])
+            except Exception:  # noqa: BLE001 - one that cannot be closed now is tried again later
+                log.exception("closing idle ticket %s failed", ticket.id[:8])
 
     def _tick_profiles(self) -> None:
         """Once an hour, look again at reachable servers whose profile is more than a day old (a few at a time)."""

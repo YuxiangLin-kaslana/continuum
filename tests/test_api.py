@@ -264,3 +264,32 @@ def test_searching_the_conversation_finds_the_persons_own_messages_as_typed(tmp_
             await rt.close()
 
     asyncio.run(main())
+
+
+def test_a_run_that_finished_its_turn_and_waits_for_no_one_is_closed_after_a_while(tmp_path):
+    async def quiet(job):
+        return None  # does its turn, reports nothing final
+
+    async def main():
+        rt = app_runtime(tmp_path, "quiet", [Plugin(name="quiet", scripts={"quiet": quiet})])
+        port, runner = await serve(rt)
+        ctx = rt.sources["app"]
+        try:
+            ctx.kind.post(ctx, "me", "main", "随便看看")
+            await until(lambda: bool(rt.store.tickets.list()) and not any(
+                s.busy for s in rt.executor.sessions.values()))
+            [ticket] = rt.store.tickets.list()
+            assert ticket.ended is None
+            rt._idle_at = 0
+            rt._tick_idle()
+            assert rt.store.tickets.get(ticket.id).ended is None  # quiet, but not for long yet
+            rt.IDLE_CLOSE = __import__("datetime").timedelta(seconds=0)
+            rt._idle_at = 0
+            rt._tick_idle()
+            await until(lambda: rt.store.tickets.get(ticket.id).ended is not None)
+            assert rt.store.tickets.get(ticket.id).ended.outcome == "stopped"
+        finally:
+            runner.cancel()
+            await rt.close()
+
+    asyncio.run(main())

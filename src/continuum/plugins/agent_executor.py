@@ -367,7 +367,9 @@ class AgentExecutor:
                 await take_inputs()
             job.report("blocked", f"用了 {config.max_steps} 步还没做完，需要人看一下。")
         except ModelError as error:
-            job.report("failed", f"模型调用失败：{error}")
+            # Like any failure, it waits for the person: a reply, or a retry, lets the worker go on.
+            job.report("failed", f"模型调用失败：{error}"[:500],
+                       question=f"没做成：模型调用失败（{str(error)[:200]}）。回复一句可以让我再试。")
         finally:
             job.activity({"type": "idle"})
             path.write_text(json.dumps(messages, ensure_ascii=False), encoding="utf-8")
