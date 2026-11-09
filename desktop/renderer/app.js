@@ -1306,10 +1306,32 @@
     return { ready: true, text: '已连接' };
   }
 
+  // A tool's own mark: the brand's logo where there is one, a plain drawing for SSH and email, letters otherwise.
+  const PLAIN_MARKS = {
+    ssh: '<rect x="3" y="4" width="18" height="7" rx="1"/><rect x="3" y="13" width="18" height="7" rx="1"/><path d="M7 7.5h.01M7 16.5h.01M11 7.5h6M11 16.5h6"/>',
+    email: '<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="m3.5 6 8.5 7 8.5-7"/>',
+  };
   function toolIcon(entry) {
-    const mark = el('span', 'tool-icon', entry.abbr);
-    mark.style.setProperty('--c', entry.color);
+    const brand = (window.ContinuumBrands || {})[entry.id];
+    const mark = el('span', `tool-icon${brand || PLAIN_MARKS[entry.id] ? ' drawn' : ''}`);
     mark.setAttribute('aria-hidden', 'true');
+    mark.style.setProperty('--c', brand ? brand.color : entry.color);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    if (brand) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', brand.path);
+      svg.append(path);
+      svg.setAttribute('class', 'brand');
+      mark.title = brand.title;
+    } else if (PLAIN_MARKS[entry.id]) {
+      svg.innerHTML = PLAIN_MARKS[entry.id];
+      svg.setAttribute('class', 'plain');
+    } else {
+      mark.textContent = entry.abbr;
+      return mark;
+    }
+    mark.append(svg);
     return mark;
   }
 

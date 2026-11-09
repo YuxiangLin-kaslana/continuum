@@ -31,3 +31,9 @@ SOFTWARE.
 
 `desktop/renderer/fonts/` bundles Jost (The Jost Project Authors) under the SIL Open Font License 1.1; its license
 text is in that directory.
+
+## Simple Icons
+
+The brand marks on the desktop app's tools page (`desktop/renderer/brands.js`) come from Simple Icons 13.21.0,
+https://simpleicons.org, released under CC0 1.0 Universal. The marks themselves are trademarks of their owners and
+are used only to name their services.

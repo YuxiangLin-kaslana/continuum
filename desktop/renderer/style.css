@@ -522,3 +522,7 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
   .tools-view:not([hidden]) { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .tools-list { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; }
 }
+.tool-icon.drawn { background: color-mix(in srgb, var(--c) 8%, #0b0f12); border-color: color-mix(in srgb, var(--c) 45%, transparent); color: var(--c); }
+.tool-icon svg { width: 58%; height: 58%; }
+.tool-icon svg.brand { fill: currentColor; }
+.tool-icon svg.plain { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
