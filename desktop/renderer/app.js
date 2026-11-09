@@ -541,6 +541,7 @@
   const STEP_NAMES = {
     shell: '运行命令', read_file: '读取文件', write_file: '写入文件', list_files: '查看目录',
     claude_code: '交给 Claude Code', codex: '交给 Codex', ssh: '远程命令', dispatch: '派出 Worker',
+    remote_agent: '交给服务器上的助手',
     github: 'GitHub', email: '邮箱', slack: 'Slack', google: 'Google', cloudflare: 'Cloudflare', godaddy: 'GoDaddy',
     aws: 'AWS', request_tool: '请你连接工具',
   };
@@ -556,7 +557,8 @@
     const item = el('li', 'step ssh approval');
     const box = el('div', 'approval-box');
     const head = el('div', 'approval-head');
-    head.append(icon('ssh'), el('span', 'step-name', '等你批准一条远程命令'));
+    head.append(icon('ssh'), el('span', 'step-name',
+      step.name === 'remote_agent' ? '等你批准：交给服务器上的编程助手去做' : '等你批准一条远程命令'));
     const [host, ...rest] = step.input.split('  $ ');
     const where = el('div', 'approval-host', `服务器 ${host}`);
     const command = el('pre', 'step-command', rest.join('  $ ') || step.input);
@@ -642,7 +644,10 @@
     let label;
     if (asking) label = '等你批准一条远程命令';
     else if (dispatching) label = `${(dispatching.output || '').split('\n').filter(Boolean).length} 个 Worker 正在同时干活…`;
-    else if (current) label = busy[current.name] || `正在${STEP_NAMES[current.name] || '处理'}…`;
+    else if (current && current.name === 'remote_agent') {
+      const [host, rest = ''] = (current.input || '').split('  $ ');
+      label = `${host} 上的 ${rest.split(/[（：]/)[0]} 正在处理…`;
+    } else if (current) label = busy[current.name] || `正在${STEP_NAMES[current.name] || '处理'}…`;
     else if (thinking) label = '思考中…';
     else label = counted ? `已执行 ${counted} 个步骤` : '已思考';
     return { asking, running, current, label };

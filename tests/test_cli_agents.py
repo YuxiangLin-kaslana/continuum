@@ -23,6 +23,9 @@ from test_runtime import drive
 
 CLAUDE = r'''
 import json, sys, os, time
+if sys.argv[1:3] == ["auth", "status"]:
+    print(json.dumps({"loggedIn": os.path.exists(os.path.expanduser("~/.claude/.credentials.json"))}, indent=2))
+    sys.exit(0)
 log = os.environ["FAKE_LOG"]
 with open(log, "a") as f:
     f.write(json.dumps(sys.argv[1:]) + "\n")
@@ -339,3 +342,66 @@ def test_an_agent_installed_for_the_user_is_found_off_the_services_path(tmp_path
     asyncio.run(ClaudeCodeExecutor().turn(ExecutorContext(config=config, scripts={}), job))
     [(state, summary, _)] = job.reports
     assert state == "failed" and "找不到命令 no-such-agent" in summary
+
+
+def test_a_job_on_one_server_goes_to_the_agent_on_that_server_with_full_access(tmp_path):
+    """The dispatcher hands a job confined to one server to the coding agent there, over ssh."""
+    from continuum.plugins import cli_agents
+    from continuum.runtime import ssh as ssh_rules
+
+    server = tmp_path / "server-home"
+    (server / ".local" / "bin").mkdir(parents=True)
+    (server / "app").mkdir()
+    (server / ".local" / "bin" / "claude").symlink_to(fake(tmp_path, "claude", CLAUDE))
+    log = tmp_path / "log"
+    # Stands in for ssh: runs the command it is given in a shell, as the server's user would.
+    stand_in = fake(tmp_path, "ssh", "import os, subprocess, sys\n"
+                    f"env = {{'HOME': {str(server)!r}, 'PATH': '/usr/bin:/bin', 'FAKE_LOG': {str(log)!r}}}\n"
+                    "sys.exit(subprocess.run(['/bin/sh', '-c', sys.argv[-1]], env=env, cwd='/').returncode)\n")
+
+    class Hosts:
+        def ssh_argv(self, name):
+            return [stand_in, name]
+
+    job = FakeJob(tmp_path / "work")
+
+    async def main():
+        first = await cli_agents.remote_delegate("claude_code", ClaudeCodeConfig(command="/somewhere/claude"), job,
+                                                 Hosts(), "crm", "看一下日志", cwd="~/app")
+        second = await cli_agents.remote_delegate("claude_code", ClaudeCodeConfig(), job, Hosts(), "crm", "第二轮：接着")
+        nowhere = await cli_agents.remote_delegate("claude_code", ClaudeCodeConfig(), job, Hosts(), "crm", "x",
+                                                   cwd="/no/such/dir", fresh=True)
+        missing = await cli_agents.remote_delegate("codex", CodexConfig(), job, Hosts(), "crm", "x")
+        return first, second, nowhere, missing
+
+    first, second, nowhere, missing = asyncio.run(main())
+    assert first == "跑完了，输出 hi，写了 note.txt。" and second == "好的，按你说的改完了。"
+    assert nowhere == "错误：crm 上的 Claude Code没有完成：服务器上没有目录 /no/such/dir"
+    assert missing == "错误：crm 上的 Codex没有完成：这台服务器上没有装 codex"
+    one, two = calls(log)
+    assert one[one.index("--permission-mode") + 1] == "bypassPermissions"
+    assert "服务器 crm" in one[one.index("--append-system-prompt") + 1]
+    # Each (agent, server) goes on in its own session.
+    assert two[two.index("--resume") + 1] == one[one.index("--session-id") + 1]
+    # Its steps show in the ticket.
+    assert any(e.get("name") == "shell" for e in job.events)
+
+    class Probed:
+        def __init__(self):
+            self.kept = {"name": "crm"}
+
+        async def run(self, name, command, timeout=60):
+            return 0, "agent:claude_code\nagent-out:codex\n"
+
+        def get(self, name):
+            return dict(self.kept)
+
+        def keep(self, name, host):
+            self.kept = host
+
+    hosts = Probed()
+    assert asyncio.run(ssh_rules.probe_agents(hosts, "crm")) == ["claude_code"] and hosts.kept["agents"] == ["claude_code"]
+    assert hosts.kept["agents_out"] == ["codex"]  # installed, signed out
+    # A run that finds the sign-in gone takes the agent off the list.
+    ssh_rules.signed_out(hosts, "crm", "claude_code")
+    assert hosts.kept["agents"] == [] and hosts.kept["agents_out"] == ["claude_code", "codex"]

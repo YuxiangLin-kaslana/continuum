@@ -268,3 +268,53 @@ def test_a_server_reached_is_looked_over_and_its_profile_kept(tmp_path):
             await rt.close()
 
     asyncio.run(main())
+
+
+def test_the_dispatcher_hands_a_job_on_one_server_to_the_coding_agent_there(tmp_path):
+    from test_agent import ScriptedModel, StreamingModel, agent_runtime, call
+    from test_cli_agents import CLAUDE, fake
+
+    from continuum.runtime.ssh import Host
+
+    server = tmp_path / "server-home"
+    (server / ".local" / "bin").mkdir(parents=True)
+    (server / ".claude").mkdir()
+    (server / ".claude" / ".credentials.json").write_text("{}")
+    (server / ".local" / "bin" / "claude").symlink_to(fake(tmp_path, "claude", CLAUDE))
+    log = tmp_path / "claude.log"
+    stand_in = fake(tmp_path, "ssh", "import subprocess, sys\n"
+                    f"env = {{'HOME': {str(server)!r}, 'PATH': '/usr/bin:/bin', 'FAKE_LOG': {str(log)!r}}}\n"
+                    "sys.exit(subprocess.run(['/bin/sh', '-c', sys.argv[-1]], env=env, cwd='/').returncode)\n")
+    router = ScriptedModel(call("decide", decision="accept", title="查 crm 慢", scope="查 crm 为什么慢",
+                                acknowledgement="好。", name="crm", reason="请求"))
+    worker = StreamingModel(
+        call("remote_agent", host="crm", agent="codex", task="查一下"),
+        call("remote_agent", host="crm", agent="claude_code", task="查 crm 为什么慢"),
+        lambda messages: call("report", state="ready", summary=f"crm 上的 Claude Code 说：{messages[-1]['content']}"))
+
+    async def main():
+        rt = agent_runtime(tmp_path / "home", router, worker, sources={"app": {"kind": "app"}},
+                           policy={"sources": {"app": {"allowed": [{"id": "me"}]}}})
+        rt.settings.ssh.admins = ["me"]
+        rt.settings.ssh.ssh_command = stand_in
+        rt.ssh.put(Host(name="crm", address="34.1.2.3", user="Yuxia", approval="auto"))
+        ctx = rt.sources["app"]
+        try:
+            rt.start()
+            ctx.kind.post(ctx, "me", "main", "crm 为什么慢")
+            done = lambda: any(r["role"] == "reply" for r in ctx.kind.history(ctx, "me", "main"))  # noqa: E731
+            await drive(rt, done, timeout=15)
+            return ctx.kind.history(ctx, "me", "main"), ctx.kind.steps(ctx, "me", None), worker.seen, rt.ssh.get("crm")
+        finally:
+            await rt.close()
+
+    from test_runtime import drive
+
+    history, steps, seen, host = asyncio.run(main())
+    assert history[-1]["text"] == "crm 上的 Claude Code 说：跑完了，输出 hi，写了 note.txt。"
+    # The dispatcher was told who does what; the server's agents were found and kept.
+    assert "【分工】" in seen[0][0]["content"] and host["agents"] == ["claude_code"]
+    assert "crm 上的 Codex没有装（可用的：Claude Code）" in seen[1][-1]["content"]
+    shown = [s for s in steps if s["name"] == "remote_agent"]
+    assert [s["status"] for s in shown] == ["done"] and shown[0]["input"] == "crm  $ Claude Code：查 crm 为什么慢"
+    assert any(s["name"] == "shell" for s in steps)  # its own steps show too

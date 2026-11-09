@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import UTC, datetime
@@ -92,9 +93,23 @@ SSH_TOOLS = [
          "reason 用一句话告诉人为什么要执行它。",
          {"host": {"type": "string", "description": "ssh_hosts 里的名字"}, "command": {"type": "string"},
           "reason": {"type": "string"}}, required=["host", "command", "reason"]),
+    tool("remote_agent", "把只涉及一台服务器的一件事，交给那台服务器上的 Claude Code 或 Codex 在那台机器上做完（它有那台机器的"
+         "完全权限，看得到那里的代码、服务和日志），返回它的结果。task 写清目标、范围和完成标准（它看不到对话）。"
+         "同一张工单里对同一台服务器的同一个助手再调用，会接着之前的会话；fresh=true 开新会话。",
+         {"host": {"type": "string", "description": "ssh_hosts 里的名字"},
+          "agent": {"type": "string", "enum": ["claude_code", "codex"]}, "task": {"type": "string"},
+          "cwd": {"type": "string", "description": "在那台服务器上的工作目录，比如 ~/o2ai-crm；默认是登录用户的主目录"},
+          "fresh": {"type": "boolean"}}, required=["host", "agent", "task"]),
 ]
 SSH_RULES = """
 你还能用 ssh_hosts / ssh 在人登记过的服务器上执行命令（它们不在你的沙箱里，由 Continuum 代为连接）。
+【分工】你（DeepSeek）是调度者，按事情涉及的范围决定谁来执行：
+- 只涉及一台登记的服务器：用 remote_agent 交给那台服务器上的 Claude Code（优先）或 Codex 去做，你写清 task、检查它交回的结果、
+  再汇报。那台服务器两个都没有，才自己用 ssh 做。
+- 只涉及 Continuum 自己这台机器：交给本机的 claude_code / codex（有的话）。
+- 要在多台服务器之间协调（对比、迁移、联调、同时查好几台）：由你和 DeepSeek 子 Worker 用 ssh 来做；其中某一部分如果
+  只在一台服务器上，也可以交给那台的 remote_agent。
+各服务器上有哪些编程助手：{agents}
 先用 ssh_hosts 看清单；去一台机器干活前用 ssh_profile 看它上面跑着什么、在开发什么。尽量用只读命令；会改东西的命令（重启、改文件、装包、删除）只在请求需要时用，reason 写清楚，
 人批准后才会执行；被拒绝就不要换个写法再试，向人说明。不要读取或输出私钥、密码等机密。
 """
@@ -232,7 +247,7 @@ DELEGATING = """
 ENDS_TURN = {"ready", "blocked", "failed", "dropped"}
 # The tools whose work a person sees as steps of the turn; the rest are the worker's calls to the host, whose words
 # reach the person as messages.
-SHOWN = {"shell", "read_file", "write_file", "list_files", "claude_code", "codex", "ssh", "dispatch",
+SHOWN = {"shell", "read_file", "write_file", "list_files", "claude_code", "codex", "ssh", "remote_agent", "dispatch",
          *INTEGRATION_STEP}
 SHOWN_OUTPUT = 4000
 
@@ -274,6 +289,21 @@ HOST_SHELL = tool("shell", "在这台主机上直接执行一条 shell 命令（
 def _basic(config: AgentConfig) -> list[dict[str, Any]]:
     """The shell and file tools, the shell described as what it is."""
     return [HOST_SHELL, *TOOLS[1:]] if config.sandbox.kind == "host" else TOOLS
+
+
+def _ssh_rules(job: Any) -> str:
+    """How to use the person's servers, with which coding agent each one has (as last found)."""
+    ssh = getattr(job, "ssh", None)
+    if ssh is None:
+        return ""
+    lines = []
+    for h in ssh.list():
+        if "agents" not in h:
+            continue
+        has = "、".join(ssh_rules.AGENT_NAMES[k] for k in h["agents"]) or "无"
+        out = "、".join(ssh_rules.AGENT_NAMES[k] for k in h.get("agents_out") or [])
+        lines.append(f"{h['name']}（{has}{f'；{out} 未登录' if out else ''}）")
+    return SSH_RULES.format(agents="；".join(lines) or "还不知道（remote_agent 会先查）")
 
 
 def _host_rules(config: AgentConfig, job: Any) -> str:
@@ -439,7 +469,7 @@ class AgentExecutor:
                     *([REQUEST_TOOL] if job.integrations is not None and job.projects is not None else [])]
         if not messages:
             system = SYSTEM + (DELEGATING.format(names="、".join(delegates)) if delegates else "")
-            system += SSH_RULES if job.ssh else ""
+            system += _ssh_rules(job)
             if job.projects:
                 tz = job.projects.timezone_of(getattr(job, "requester", "")) if hasattr(job.projects, "timezone_of") \
                     else "UTC"
@@ -524,6 +554,8 @@ class AgentExecutor:
         key = f"{call_id or 'call'}-{uuid.uuid4().hex[:8]}"
         if name == "ssh":
             return await self._ssh(job, key, args), False
+        if name == "remote_agent":
+            return await self._remote_agent(job, config, key, args), False
         if name == "dispatch":
             return await self._dispatch(job, config, key, args), False
         if name in INTEGRATION_STEP:
@@ -655,7 +687,7 @@ class AgentExecutor:
         connected = job.integrations.connected() if getattr(job, "integrations", None) else set()
         tools = [*_basic(config)[:4], *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
                  *(t for kind in INTEGRATION_TOOLS if kind in connected for t in INTEGRATION_TOOLS[kind]), FINISH]
-        system = SUB_SYSTEM.format(folder=f"sub-{number}") + (SSH_RULES if job.ssh else "") + _host_rules(config, job)
+        system = SUB_SYSTEM.format(folder=f"sub-{number}") + _ssh_rules(job) + _host_rules(config, job)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
             {"role": "user", "content": f"项目背景：\n{job.assignment}\n\n你的子任务（{label}）：\n{task}"}]
@@ -682,6 +714,50 @@ class AgentExecutor:
             return f"用了 {config.max_steps} 步还没做完。"
         except ModelError as error:
             return f"模型调用失败：{error}"
+
+    async def _remote_agent(self, job, config: AgentConfig, key: str, args: dict[str, Any]) -> str:
+        """A job on one server, handed to the coding agent there: after the person's approval if the server needs it."""
+        ssh = getattr(job, "ssh", None)
+        if ssh is None:
+            return "错误：你不能使用 SSH 服务器"
+        if "_invalid" in args:
+            return f"错误：参数不是合法的 JSON：{args['_invalid'][:200]}"
+        name, kind, task = str(args.get("host", "")), str(args.get("agent", "")), str(args.get("task", "")).strip()
+        host = ssh.get(name)
+        if host is None:
+            return f"错误：没有叫 {name} 的服务器；用 ssh_hosts 看清单"
+        if kind not in ssh_rules.AGENT_NAMES:
+            return "错误：agent 只能是 claude_code 或 codex"
+        if not task:
+            return "错误：task 是空的"
+        if "agents" not in host:
+            await ssh_rules.probe_agents(ssh, name)
+            host = ssh.get(name) or host
+        has = host.get("agents")
+        if has is not None and kind not in has:
+            others = "、".join(ssh_rules.AGENT_NAMES[k] for k in has) or "没有可用的编程助手"
+            why = "登录已失效" if kind in (host.get("agents_out") or []) else "没有装"
+            return f"错误：{name} 上的 {ssh_rules.AGENT_NAMES[kind]}{why}（可用的：{others}）"
+        cwd = str(args.get("cwd") or "").strip() or None
+        step = {"type": "step", "key": key, "name": "remote_agent",
+                "input": f"{name}  $ {ssh_rules.AGENT_NAMES[kind]}{f'（{cwd}）' if cwd else ''}：{task}"}
+        # It may do anything there: only a server that runs everything without asking skips the person.
+        if host.get("approval", "ask") != "auto":
+            job.activity({**step, "status": "approval", "output": "让它在这台服务器上做这件事"})
+            decision = await ssh.approvals.wait(job.ticket_id, key, APPROVAL_TIMEOUT)
+            if decision != "approved":
+                words = "人拒绝了" if decision == "refused" else "等了 30 分钟没有人批准"
+                job.activity({**step, "status": "error", "output": words})
+                return f"没有执行：{words}。"
+        job.activity({**step, "status": "running", "output": ""})
+        base = (getattr(job, "delegates", None) or config.delegates()).get(kind) or (
+            cli_agents.ClaudeCodeConfig() if kind == "claude_code" else cli_agents.CodexConfig())
+        answer = await cli_agents.remote_delegate(kind, base, job, ssh, name, task, cwd, bool(args.get("fresh")))
+        if answer.startswith("错误：") and re.search(r"authenticat|not logged in|log ?in|401|expired", answer, re.I):
+            ssh_rules.signed_out(ssh, name, kind)
+            answer += f"\n（{name} 上的 {ssh_rules.AGENT_NAMES[kind]} 登录已失效，已记下；这件事换另一个助手或自己用 ssh 做）"
+        job.activity({**step, "status": "error" if answer.startswith("错误：") else "done", "output": _clip(answer)})
+        return answer if len(answer) <= 20000 else answer[:20000] + "\n...[后面截断]"
 
     async def _ssh(self, job, key: str, args: dict[str, Any]) -> str:
         """One command on one of the person's servers: run by the host, after the person's approval if it needs it."""
@@ -777,8 +853,12 @@ class AgentExecutor:
                     via = f"，经过 {h['jump']}" if h.get("jump") else ""
                     profile = (h.get("profile") or {}).get("text") or ""
                     about = next((line.strip(" -#*1.") for line in profile.splitlines() if line.strip()), "")
+                    agents = "、".join(ssh_rules.AGENT_NAMES[k] for k in h["agents"]) if h.get("agents") else (
+                        "无" if "agents" in h else "未知")
+                    if h.get("agents_out"):
+                        agents += f"（{'、'.join(ssh_rules.AGENT_NAMES[k] for k in h['agents_out'])} 未登录）"
                     rows.append(f"- {h['name']}：{h['user']}@{h['address']}:{h['port']}{via}；"
-                                f"执行权限：{ssh_rules.APPROVALS.get(h.get('approval', 'ask'))}；{tested}"
+                                f"执行权限：{ssh_rules.APPROVALS.get(h.get('approval', 'ask'))}；{tested}；编程助手：{agents}"
                                 + (f"；概况：{about[:80]}" if about else ""))
                 return "\n".join(rows) or "（没有登记的服务器）", False
             if name == "ack":
