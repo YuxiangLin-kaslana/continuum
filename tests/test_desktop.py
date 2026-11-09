@@ -93,11 +93,10 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         # Avatars are drawn from the names: the person's and the assistant's.
         assert page.locator(".msg.user .avatar svg").count() == 3 and page.locator(".msg.acknowledgement .avatar svg").count() == 1
         assert page.locator("#me-avatar svg").count() == 1
-        # In the main conversation a project's work is one line; its steps are on the project's page.
-        line = page.locator("#messages .work.compact").first
-        assert "核对 Laser" in line.inner_text() and "已执行 2 个步骤" in line.inner_text()
-        assert page.locator("#messages .step").count() == 0
-        line.get_by_role("button", name="查看过程").click()
+        # Work that is over leaves no line in the main conversation; its steps are on the project's page.
+        assert page.locator("#messages .work, #messages .step").count() == 0
+        page.click("#tab-projects")
+        page.locator(".card.project[data-project=t-1]").get_by_role("button", name="去回答").click()
         page.wait_for_selector("#project-detail:not([hidden])")
         page.locator("#project-messages .work summary").first.click()
         assert "python3 compare.py quotes/" in page.locator("#project-messages .work .step.shell").first.inner_text()

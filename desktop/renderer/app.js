@@ -650,8 +650,10 @@
 
   // In the main conversation a project's work is one line: the dispatcher handed it to a project, which does it and
   // comes back with the result. Its steps are on the project's page; a command waiting for the person shows here.
+  // Work that is over leaves no line: its answer is in the conversation, its steps on the projects tab.
   function projectLine(ticket, steps, thinking) {
     const { asking, running, label } = workState(steps, thinking);
+    if (!running && !asking) return null;
     const project = (steps.find((s) => s.project) || {}).project || ticket;
     const item = el('li', `work compact${running ? ' running' : ''}`);
     item.dataset.ticket = ticket;
@@ -726,7 +728,8 @@
     const flush = () => {
       if (!run) return;
       const draw = box === $('messages') ? projectLine : workBox;
-      nodes.push(draw(run.ticket, run.steps, thinkingHere.has(run.ticket) && run.last));
+      const drawn = draw(run.ticket, run.steps, thinkingHere.has(run.ticket) && run.last);
+      if (drawn) nodes.push(drawn);
       run = null;
     };
     timeline.forEach((entry, index) => {
