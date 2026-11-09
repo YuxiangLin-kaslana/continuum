@@ -225,3 +225,13 @@ kind = "claude_code"        # 或 "codex"
 容器和 pm2 进程、监听的端口、定时任务、登录用户家目录附近的 git 仓库（当前分支、最近的提交、有没有未提交的改动），再由 DeepSeek
 整理成一份概况，存在这台服务器的记录里。可以连上的服务器每天重新巡检一次，设置页也可以手动“巡检”。
 Worker 的 `ssh_hosts` 列出每台机器概况的第一句，`ssh_profile` 读完整概况和巡检原始输出；去一台机器干活前先看它。
+
+## 其他工具
+
+设置页的“工具”里可以连接 GitHub、邮箱、Slack、Google（Cloud / Drive / Docs）、Cloudflare、GoDaddy。凭据只存在服务器
+`<home>/integrations/<工具>.json`（600 权限）里，不进数据库，也不再回传给桌面端；保存时马上测试一次，记下连的是哪个账号。
+
+Worker（以及它派出的子 Worker）在发起人是管理员、工具已连接时多出对应的工具，都由服务器代为调用，凭据不进沙箱：
+`github`（执行 gh）、`email_search` / `email_read` / `email_send`（IMAP / SMTP）、`slack`（Web API）、`gcloud` 和
+`google_api`（服务账号；服务账号只能看到共享给它的 Drive 文件）、`cloudflare` 和 `godaddy`（按路径调用它们的 API）。
+工具输出里如果出现已保存的凭据，一律换成 `***`。

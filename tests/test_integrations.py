@@ -1,0 +1,180 @@
+"""The person's other tools: kept privately, never shown back, called with the right credentials, used by workers."""
+
+import asyncio
+import base64
+import json
+import stat
+import subprocess
+import sys
+
+import httpx
+import pytest
+
+from continuum.runtime.integrations import IntegrationError, Integrations, _body_text
+
+from test_agent import ScriptedModel, StreamingModel, agent_runtime, call
+from test_api import serve
+
+
+def fake_gh(tmp_path):
+    script = tmp_path / "fake-gh"
+    script.write_text(f"#!{sys.executable}\nimport os, sys, json\n"
+                      "print(json.dumps({'argv': sys.argv[1:], 'token': os.environ.get('GH_TOKEN')}))\n"
+                      "sys.exit(0)\n")
+    script.chmod(0o755)
+    return str(script)
+
+
+def test_credentials_are_kept_in_private_files_and_never_shown_back(tmp_path):
+    tools = Integrations(tmp_path)
+    tools.save("github", {"token": "ghp_secret"})
+    path = tmp_path / "integrations" / "github.json"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600 and stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    assert "ghp_secret" not in json.dumps(tools.view())
+    # A secret left empty keeps the one already kept.
+    tools.save("github", {"token": ""})
+    assert tools.get("github")["secrets"]["token"] == "ghp_secret"
+    with pytest.raises(IntegrationError):
+        tools.save("slack", {})
+    tools.save("email", {"preset": "gmail", "address": "me@example.com", "password": "app-pass"})
+    assert tools.get("email")["settings"]["imap_host"] == "imap.gmail.com"
+    assert tools.connected() == {"github", "email"}
+    assert tools.remove("github") and tools.connected() == {"email"}
+
+
+def test_github_runs_gh_with_the_persons_token(tmp_path):
+    tools = Integrations(tmp_path)
+    tools.gh = fake_gh(tmp_path)
+    tools.save("github", {"token": "ghp_secret"})
+    out = json.loads(asyncio.run(tools.github("gh pr list --repo 'o/r name'")).split("\n", 1)[1])
+    assert out == {"argv": ["pr", "list", "--repo", "o/r name"], "token": "ghp_secret"}
+    assert asyncio.run(tools.test("github"))["ok"]
+
+
+def test_http_tools_send_their_own_credentials_and_only_to_their_own_api(tmp_path):
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, str(request.url), request.headers.get("authorization")))
+        if "slack.com" in str(request.url):
+            return httpx.Response(200, json={"ok": True, "user": "bot", "team": "o2"})
+        if request.url.path.endswith("/tokens/verify"):
+            return httpx.Response(200, json={"success": True})
+        if request.url.path.endswith("/zones"):
+            return httpx.Response(200, json={"result": [{"name": "yuxianglin.xyz"}]})
+        return httpx.Response(200, json=[{"domain": "o2tech.ai"}])
+
+    tools = Integrations(tmp_path, transport=httpx.MockTransport(handler))
+    tools.save("slack", {"token": "xoxb-1"})
+    tools.save("cloudflare", {"token": "cf-1"})
+    tools.save("godaddy", {"key": "k", "secret": "s"})
+    assert asyncio.run(tools.test("slack"))["message"] == "已连接：bot @ o2"
+    assert "yuxianglin.xyz" in asyncio.run(tools.test("cloudflare"))["message"]
+    assert "o2tech.ai" in asyncio.run(tools.test("godaddy"))["message"]
+    asyncio.run(tools.api("godaddy", "GET", "/v1/domains/o2tech.ai/records"))
+    assert seen[-1] == ("GET", "https://api.godaddy.com/v1/domains/o2tech.ai/records", "sso-key k:s")
+    assert ("POST", "https://slack.com/api/auth.test", "Bearer xoxb-1") in seen
+    assert any(u.startswith("https://api.cloudflare.com/client/v4/zones") and a == "Bearer cf-1" for _, u, a in seen)
+    for bad in ["https://evil.example/x", "zones", "/../x"]:
+        with pytest.raises(IntegrationError):
+            asyncio.run(tools.api("cloudflare", "GET", bad))
+    with pytest.raises(IntegrationError):
+        asyncio.run(tools.slack("https://evil"))
+
+
+def test_google_signs_for_a_token_with_the_service_accounts_key(tmp_path):
+    key = subprocess.run(["openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048"],
+                         capture_output=True, text=True, check=True).stdout
+    asked = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "oauth2.googleapis.com":
+            form = dict(x.split("=", 1) for x in request.content.decode().split("&"))
+            asked.append(form["assertion"])
+            return httpx.Response(200, json={"access_token": "ya29.t", "expires_in": 3600})
+        assert request.headers["authorization"] == "Bearer ya29.t"
+        return httpx.Response(200, json={"files": [{"name": "MRP 计划"}]})
+
+    tools = Integrations(tmp_path, transport=httpx.MockTransport(handler))
+    with pytest.raises(IntegrationError):
+        tools.save("google", {"key_json": "{}"})
+    tools.save("google", {"key_json": json.dumps({"type": "service_account", "client_email": "bot@p.iam.gserviceaccount.com",
+                                                  "private_key": key, "project_id": "p"})})
+    assert asyncio.run(tools.test("google"))["message"] == "已连接：bot@p.iam.gserviceaccount.com"
+    header, claims, signature = asked[0].split(".")
+    pad = lambda s: base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))  # noqa: E731
+    assert json.loads(pad(header))["alg"] == "RS256" and len(pad(signature)) == 256
+    assert json.loads(pad(claims))["iss"] == "bot@p.iam.gserviceaccount.com"
+    assert "drive" in json.loads(pad(claims))["scope"]
+    assert "MRP 计划" in asyncio.run(tools.google_api("GET", "https://www.googleapis.com/drive/v3/files"))
+    assert len(asked) == 1  # the token is kept while it lasts
+    with pytest.raises(IntegrationError):
+        asyncio.run(tools.google_api("GET", "https://evil.example/drive"))
+
+
+def test_an_email_body_reads_as_text():
+    import email
+
+    message = email.message_from_bytes(
+        "Content-Type: multipart/alternative; boundary=b\n\n--b\nContent-Type: text/html; charset=utf-8\n\n"
+        "<p>你好 <b>MRP</b></p>\n--b--\n".encode())
+    assert _body_text(message) == "你好 MRP"
+
+
+def test_a_secret_a_tool_prints_is_masked_before_anyone_sees_it(tmp_path):
+    tools = Integrations(tmp_path)
+    tools.gh = fake_gh(tmp_path)  # prints the token it was given
+    tools.save("github", {"token": "ghp_secret"})
+    assert "ghp_secret" not in tools.scrub(asyncio.run(tools.github("auth status")))
+    assert "ghp_secret" not in json.dumps(asyncio.run(tools.test("github")))
+
+
+def test_the_settings_api_connects_tools_for_admins_only_and_never_returns_secrets(tmp_path):
+    from test_ssh import ssh_runtime
+
+    async def main():
+        rt = ssh_runtime(tmp_path)
+        rt.integrations.gh = fake_gh(tmp_path)
+        me = {"Authorization": f"Bearer {rt.accounts.add('me')}"}
+        bob = {"Authorization": f"Bearer {rt.accounts.add('bob')}"}
+        port, runner = await serve(rt)
+        try:
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as c:
+                assert (await c.get("/api/v1/integrations", headers=bob)).json() == {"admin": False, "tools": []}
+                assert (await c.put("/api/v1/integrations/github", headers=bob, json={"token": "x"})).status_code == 403
+                saved = await c.put("/api/v1/integrations/github", headers=me, json={"token": "ghp_secret"})
+                assert saved.status_code == 200 and saved.json()["connected"] and saved.json()["test"]["ok"]
+                page = await c.get("/api/v1/integrations", headers=me)
+                assert "ghp_secret" not in page.text and len(page.json()["tools"]) == 6
+                assert (await c.put("/api/v1/integrations/nothing", headers=me, json={})).status_code == 422
+                assert (await c.delete("/api/v1/integrations/github", headers=me)).json() == {"removed": True}
+        finally:
+            runner.cancel()
+            await rt.close()
+
+    asyncio.run(main())
+
+
+def test_a_worker_uses_a_connected_tool_through_the_host(tmp_path):
+    router = ScriptedModel(call("decide", decision="accept", title="看 PR", scope="看", reason="r"))
+    worker = StreamingModel(call("github", args="pr list --repo o/r"),
+                            lambda m: call("report", state="ready", summary=m[-1]["content"][:40]))
+    async def main():
+        from test_runtime import drive, replies
+
+        rt = agent_runtime(tmp_path, router, worker)
+        rt.settings.ssh.admins = ["me"]
+        rt.integrations.gh = fake_gh(tmp_path)
+        rt.integrations.save("github", {"token": "ghp_secret"})
+        try:
+            from test_agent import post
+
+            post(tmp_path, "看看 o/r 的 PR")
+            await drive(rt, lambda: len(replies(tmp_path)) == 2, timeout=10)
+            return replies(tmp_path), [m for m in worker.seen[0] if m["role"] == "system"][0]["content"]
+        finally:
+            await rt.close()
+
+    answers, system = asyncio.run(main())
+    assert answers[-1][1].startswith("[exit code 0]") and "ghp_secret" not in answers[-1][1]
+    assert "github" in system

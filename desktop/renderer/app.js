@@ -40,6 +40,7 @@
     list_files: '<path d="M3 6h6l2 2h10v11H3z"/>',
     think: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18 16l.7 1.8 1.8.7-1.8.7L18 21l-.7-1.8-1.8-.7 1.8-.7z"/>',
     chevron: '<path d="m9 6 6 6-6 6"/>',
+    plug: '<path d="M9 3v5M15 3v5M6 8h12v4a6 6 0 0 1-12 0zM12 18v3"/>',
     bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
     repeat: '<path d="M4 12a8 8 0 0 1 14-5.3L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-14 5.3L4 15"/><path d="M4 20v-5h5"/>',
     claude_code: '<path d="M4 12h11M11 7l5 5-5 5"/><rect x="16" y="4" width="5" height="16" rx="1"/>',
@@ -293,7 +294,10 @@
       renderMessages(true);
       $('input').focus();
     }
-    if (view === 'settings') loadSsh();
+    if (view === 'settings') {
+      loadSsh();
+      loadTools();
+    }
   }
 
   // The projects tab: the list of projects or of workers, or one project with its own part of the conversation.
@@ -498,6 +502,7 @@
   const STEP_NAMES = {
     shell: '运行命令', read_file: '读取文件', write_file: '写入文件', list_files: '查看目录',
     claude_code: '交给 Claude Code', codex: '交给 Codex', ssh: '远程命令', dispatch: '派出 Worker',
+    github: 'GitHub', email: '邮箱', slack: 'Slack', google: 'Google', cloudflare: 'Cloudflare', godaddy: 'GoDaddy',
   };
 
   function remember(details, key, fallback) {
@@ -549,7 +554,8 @@
     const summary = el('summary');
     // A step one of the lead's sub-workers took says which one.
     if (step.worker) summary.append(el('span', 'step-worker', step.worker));
-    summary.append(icon(STEP_NAMES[step.name] ? step.name : 'think'));
+    const TOOL_STEPS = ['github', 'email', 'slack', 'google', 'cloudflare', 'godaddy'];
+    summary.append(icon(TOOL_STEPS.includes(step.name) ? 'plug' : STEP_NAMES[step.name] ? step.name : 'think'));
     if (step.name === 'think') {
       summary.append(el('span', 'step-name', `思考了 ${step.input || 1} 秒`));
     } else {
@@ -977,6 +983,7 @@
 
   const TOOL_NAMES = {
     claude_code: 'Claude Code', codex: 'Codex', ssh: '远程命令', shell: '本地命令', files: '文件操作',
+    github: 'GitHub', email: '邮箱', slack: 'Slack', google: 'Google', cloudflare: 'Cloudflare', godaddy: 'GoDaddy',
   };
   const FILE_STEPS = new Set(['read_file', 'write_file', 'list_files']);
 
@@ -1057,7 +1064,10 @@
       tile(page.totals.assignments, '累计调用 Worker'),
       tile(page.totals.tickets, '工单'));
     const tools = toolsUsed(page.tools);
-    $('worker-tools').replaceChildren(...Object.keys(TOOL_NAMES).map((k) => tile(tools[k] || 0, TOOL_NAMES[k], 'small')));
+    // The everyday tools always; a connected service once it has been used.
+    const everyday = ['claude_code', 'codex', 'ssh', 'shell', 'files'];
+    $('worker-tools').replaceChildren(...Object.keys(TOOL_NAMES).filter((k) => everyday.includes(k) || tools[k])
+      .map((k) => tile(tools[k] || 0, TOOL_NAMES[k], 'small')));
     const box = $('workers');
     box.replaceChildren();
     const group = (name, label, kind, items, live) => {
@@ -1097,6 +1107,171 @@
   function workersChanged() {
     if (workersSoon) return;
     workersSoon = setTimeout(() => { workersSoon = null; loadWorkers(); }, 600);
+  }
+
+  // --- settings: the person's other tools ---
+
+  const TOOL_FORMS = {
+    github: { name: 'GitHub', hint: '在 GitHub → Settings → Developer settings → Personal access tokens 建一个令牌（fine-grained，选要用的仓库和权限）。',
+      fields: [['token', '令牌', 'password']] },
+    email: { name: '邮箱', hint: 'Gmail 要先开两步验证，再在“应用专用密码”里生成一个密码填这里，不是登录密码。',
+      fields: [['preset', '类型', 'select'], ['address', '邮箱地址', 'text'], ['password', '应用专用密码', 'password'],
+        ['imap_host', '收信服务器（IMAP）', 'text', 'custom'], ['imap_port', 'IMAP 端口', 'number', 'custom'],
+        ['smtp_host', '发信服务器（SMTP）', 'text', 'custom'], ['smtp_port', 'SMTP 端口', 'number', 'custom']] },
+    slack: { name: 'Slack', hint: '在 api.slack.com/apps 建一个 App，给它要用的权限（chat:write、channels:read、channels:history…），装到工作区后复制 Bot Token（xoxb- 开头）。',
+      fields: [['token', 'Bot Token', 'password']] },
+    google: { name: 'Google（Cloud / Drive / Docs）', hint: '在 Google Cloud 控制台建一个服务账号，生成 JSON 密钥，整段粘贴到这里。要让它读写 Drive / Docs 的文件，把文件共享给服务账号的邮箱。',
+      fields: [['key_json', '服务账号 JSON 密钥', 'textarea'], ['project', '默认项目（可选）', 'text']] },
+    cloudflare: { name: 'Cloudflare', hint: '在 Cloudflare → My Profile → API Tokens 建一个令牌（比如“Edit zone DNS”模板，选要管理的域名）。',
+      fields: [['token', 'API 令牌', 'password']] },
+    godaddy: { name: 'GoDaddy', hint: '在 developer.godaddy.com/keys 建一个 Production 的 API Key。',
+      fields: [['key', 'API Key', 'password'], ['secret', 'API Secret', 'password']] },
+  };
+  const tools = { list: [], editing: null };
+
+  async function loadTools() {
+    if (!api.tools) return;
+    let page;
+    try {
+      page = await call('tools');
+    } catch (error) {
+      showStatus(error.message);
+      return;
+    }
+    tools.list = page.admin ? page.tools : [];
+    renderTools();
+  }
+
+  function toolCard(t) {
+    const form = TOOL_FORMS[t.kind];
+    const test = t.test || {};
+    const kind = !t.connected ? 'untested' : test.ok === false ? 'bad' : 'ok';
+    const box = el('article', `card notched host tool ${kind}`);
+    box.dataset.tool = t.kind;
+    const top = el('div', 'card-top');
+    top.append(el('span', 'ticket-id', t.kind.toUpperCase()),
+      el('span', 'stage', !t.connected ? '没有连接' : test.ok === false ? '连不上' : '已连接'));
+    box.append(top, el('div', 'card-title', form.name));
+    const detail = el('dl', 'detail');
+    const row = (label, value, cls = '') => { if (value) detail.append(el('dt', '', label), el('dd', cls, value)); };
+    row('账号', t.account);
+    if (test.message && test.ok === false) row('上次测试', test.message, 'question');
+    if (t.settings && t.settings.address) row('邮箱', t.settings.address);
+    if (t.settings && t.settings.client_email) row('服务账号', t.settings.client_email);
+    if (detail.childNodes.length) box.append(detail);
+    if (tools.editing === t.kind) box.append(toolForm(t, form));
+    const foot = el('div', 'card-foot');
+    const actions = el('div', 'actions');
+    if (tools.editing !== t.kind) {
+      const open = el('button', t.connected ? 'outline' : 'outline amber', t.connected ? '修改' : '连接');
+      open.addEventListener('click', () => { tools.editing = t.kind; renderTools(); });
+      actions.append(open);
+    }
+    if (t.connected) {
+      const again = el('button', 'outline', '测试');
+      again.addEventListener('click', async () => {
+        again.disabled = true;
+        try {
+          const updated = await call('toolTest', t.kind);
+          tools.list = tools.list.map((x) => (x.kind === t.kind ? updated : x));
+          renderTools();
+        } catch (error) {
+          showStatus(error.message);
+          again.disabled = false;
+        }
+      });
+      const off = el('button', 'outline danger', '断开');
+      off.addEventListener('click', async () => {
+        if (!off.dataset.confirm) { off.dataset.confirm = '1'; off.textContent = '确认断开？'; return; }
+        try {
+          await call('toolRemove', t.kind);
+          await loadTools();
+        } catch (error) {
+          showStatus(error.message);
+        }
+      });
+      actions.append(again, off);
+    }
+    foot.append(actions);
+    box.append(foot);
+    return box;
+  }
+
+  function toolForm(t, form) {
+    const box = el('form', 'tool-form');
+    box.noValidate = true;
+    box.append(el('p', 'hint', form.hint));
+    const grid = el('div', 'form-grid');
+    const inputs = {};
+    for (const [key, label, type, only] of form.fields) {
+      const wrap = el('label', type === 'textarea' || key === 'address' ? 'wide' : '');
+      wrap.append(document.createTextNode(label));
+      let input;
+      if (type === 'select') {
+        input = el('select');
+        for (const [value, text] of [['gmail', 'Gmail'], ['outlook', 'Outlook / Microsoft 365'], ['custom', '其他']]) {
+          input.append(Object.assign(el('option', '', text), { value }));
+        }
+        input.value = (t.settings && t.settings.preset) || 'gmail';
+        input.addEventListener('change', () => {
+          for (const node of grid.querySelectorAll('[data-only=custom]')) node.hidden = input.value !== 'custom';
+        });
+      } else if (type === 'textarea') {
+        input = el('textarea');
+        input.rows = 5;
+        input.spellcheck = false;
+      } else {
+        input = el('input');
+        input.type = type;
+        input.spellcheck = false;
+        input.autocomplete = 'off';
+      }
+      if (type === 'password' || type === 'textarea') {
+        input.placeholder = t.connected ? '已保存（留空不改）' : '';
+      } else if (type !== 'select' && t.settings && t.settings[key] !== undefined) {
+        input.value = t.settings[key];
+      }
+      if (only) wrap.dataset.only = only;
+      wrap.append(input);
+      inputs[key] = input;
+      grid.append(wrap);
+    }
+    for (const node of grid.querySelectorAll('[data-only=custom]')) {
+      node.hidden = !inputs.preset || inputs.preset.value !== 'custom';
+    }
+    const error = el('p', 'error');
+    error.hidden = true;
+    const actions = el('div', 'actions');
+    const cancel = el('button', 'outline', '取消');
+    cancel.type = 'button';
+    cancel.addEventListener('click', () => { tools.editing = null; renderTools(); });
+    const save = el('button', 'outline amber', '保存并测试');
+    save.type = 'submit';
+    actions.append(cancel, save);
+    box.append(grid, error, actions);
+    box.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const fields = {};
+      for (const [key, input] of Object.entries(inputs)) if (input.value !== '') fields[key] = input.value;
+      save.disabled = true;
+      save.textContent = '测试中…';
+      try {
+        const updated = await call('toolSave', t.kind, fields);
+        tools.list = tools.list.map((x) => (x.kind === t.kind ? updated : x));
+        tools.editing = null;
+        renderTools();
+      } catch (err) {
+        error.textContent = err.message;
+        error.hidden = false;
+        save.disabled = false;
+        save.textContent = '保存并测试';
+      }
+    });
+    return box;
+  }
+
+  function renderTools() {
+    $('tools').replaceChildren(...tools.list.map(toolCard));
   }
 
   // --- settings: the SSH servers Continuum may reach ---

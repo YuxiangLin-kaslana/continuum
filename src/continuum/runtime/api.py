@@ -20,6 +20,7 @@ from continuum.core.errors import UserError
 from continuum.core.model import ActorRef, Ticket
 from continuum.core.stage import can_retry, ticket_stage
 
+from .integrations import EMAIL_PRESETS, IntegrationError
 from .projects import project_of_thread
 from .ssh import APPROVALS, Host, survey
 
@@ -425,6 +426,44 @@ def create_app(rt: Runtime) -> FastAPI:
             raise HTTPException(404, "没有这台服务器")
         model = rt.models.get(str(rt.settings.router.config.get("model", "default")))
         return ssh_view(await survey(rt.ssh, name, model))
+
+    # --- the person's other tools (admins only): credentials go in, never come back out ---
+
+    @app.get("/api/v1/integrations")
+    async def integrations(user: str = Depends(user_of)) -> dict[str, Any]:
+        if user not in rt.settings.ssh.admins:
+            return {"admin": False, "tools": []}
+        return {"admin": True, "tools": rt.integrations.view(), "email_presets": EMAIL_PRESETS}
+
+    def tool_view(kind: str) -> dict[str, Any]:
+        return next(t for t in rt.integrations.view() if t["kind"] == kind)
+
+    @app.put("/api/v1/integrations/{kind}")
+    async def connect_tool(kind: str, body: dict[str, Any], user: str = Depends(user_of)) -> dict[str, Any]:
+        ssh_admin(user)
+        try:
+            rt.integrations.save(kind, body)
+            await rt.integrations.test(kind)
+        except IntegrationError as error:
+            raise HTTPException(422, str(error)) from None
+        return tool_view(kind)
+
+    @app.post("/api/v1/integrations/{kind}/test")
+    async def test_tool(kind: str, user: str = Depends(user_of)) -> dict[str, Any]:
+        ssh_admin(user)
+        try:
+            await rt.integrations.test(kind)
+        except IntegrationError as error:
+            raise HTTPException(409 if "没有连接" in str(error) else 404, str(error)) from None
+        return tool_view(kind)
+
+    @app.delete("/api/v1/integrations/{kind}")
+    async def disconnect_tool(kind: str, user: str = Depends(user_of)) -> dict[str, Any]:
+        ssh_admin(user)
+        try:
+            return {"removed": rt.integrations.remove(kind)}
+        except IntegrationError as error:
+            raise HTTPException(404, str(error)) from None
 
     @app.post("/api/v1/approvals/{ticket_id}/{key}")
     async def approve(ticket_id: str, key: str, body: ApprovalRequest, user: str = Depends(user_of)) \

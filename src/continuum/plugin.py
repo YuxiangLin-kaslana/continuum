@@ -115,6 +115,8 @@ class ExecutorContext:
     projects: Any = None
     # The places sub-workers take when a lead sends several out at once (runtime.crew.Crew).
     crew: Any = None
+    # The person's other tools: GitHub, email, Slack, Google, Cloudflare, GoDaddy (runtime.integrations).
+    integrations: Any = None
 
 
 class ExecutorKind(Protocol):

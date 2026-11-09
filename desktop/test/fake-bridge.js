@@ -47,6 +47,8 @@
   ];
   const steps = [];
   const approvals = {};
+  const toolList = ['github', 'email', 'slack', 'google', 'cloudflare', 'godaddy']
+    .map((kind) => ({ kind, connected: false, account: null, settings: {}, test: null }));
   let nextStep = 1;
   const step = (project, ticket, key, name, input, status, output = '') => {
     let row = steps.find((x) => x.ticket_id === ticket && x.key === key);
@@ -265,6 +267,20 @@
       h.profile = { ok: true, updated_at: now(), text: `${name} 是 ERP 的生产机。\n- 服务：nginx（443）、erp-api\n- 项目：/home/u/erp，分支 feature/mrp，在做 MRP` };
       resolve({ ok: true, data: { ...h } });
     }, 100)),
+    tools: () => ok({ admin: true, tools: toolList.map((t) => ({ ...t })) }),
+    toolSave: (kind, fields) => {
+      const t = toolList.find((x) => x.kind === kind);
+      if (kind === 'github' && !fields.token && !t.connected) return Promise.resolve({ ok: false, status: 422, error: '还没有填凭据' });
+      Object.assign(t, { connected: true, account: kind === 'github' ? 'YuxiangLin-kaslana' : 'ok',
+        test: { ok: true, message: '已连接', at: now() } });
+      window.__fake.savedTools = { ...(window.__fake.savedTools || {}), [kind]: fields };
+      return ok({ ...t });
+    },
+    toolTest: (kind) => ok({ ...toolList.find((x) => x.kind === kind) }),
+    toolRemove: (kind) => {
+      Object.assign(toolList.find((x) => x.kind === kind), { connected: false, account: null, test: null });
+      return ok({ removed: true });
+    },
     sshDelete: (name) => {
       if (sshHosts.some((h) => h.jump === name)) return Promise.resolve({ ok: false, status: 409, error: `${sshHosts.filter((h) => h.jump === name).map((h) => h.name).join(', ')} 还经过它跳转，先改掉它们` });
       sshHosts.splice(sshHosts.findIndex((h) => h.name === name), 1);

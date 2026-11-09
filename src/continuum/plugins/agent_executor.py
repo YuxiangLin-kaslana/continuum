@@ -149,6 +149,48 @@ shell 命令在沙箱中执行，工作目录 /work 和负责人、其他子 Wor
 """
 MAX_DISPATCH = 12
 
+# The person's other tools, run by the host with their credentials: offered when connected, to someone allowed.
+_HTTP = {"method": {"type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]},
+         "path": {"type": "string"}, "body": {"type": "object", "description": "可选，JSON 请求体"}}
+INTEGRATION_TOOLS = {
+    "github": [tool("github", "用人的 GitHub 账号执行一条 gh 命令；args 是 gh 后面的部分，比如 \"pr list --repo owner/name\"、"
+                    "\"issue view 12 --repo owner/name\"、\"api repos/owner/name/commits --jq '.[0:5]'\"。",
+                    {"args": {"type": "string"}})],
+    "email": [
+        tool("email_search", "在人的邮箱里找邮件，返回 uid、时间、发件人、主题。query 写要找的文字，或 IMAP 条件"
+             "（FROM x、SUBJECT y、SINCE 01-Nov-2026、UNSEEN）。", {"query": {"type": "string"},
+             "folder": {"type": "string", "description": "默认 INBOX"}, "limit": {"type": "integer"}},
+             required=["query"]),
+        tool("email_read", "读一封邮件（email_search 给的 uid）。", {"uid": {"type": "string"},
+             "folder": {"type": "string"}}, required=["uid"]),
+        tool("email_send", "用人的邮箱发一封邮件（纯文本）。只在请求明确要你发的时候发。",
+             {"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"},
+              "cc": {"type": "string"}}, required=["to", "subject", "body"])],
+    "slack": [tool("slack", "调用 Slack Web API（用人连接的机器人）：method 是方法名，params 是参数，比如 "
+                   "conversations.list、conversations.history {channel}、chat.postMessage {channel, text}。",
+                   {"method": {"type": "string"}, "params": {"type": "object"}}, required=["method"])],
+    "google": [
+        tool("gcloud", "用人连接的 Google 服务账号执行一条 gcloud 命令；args 是 gcloud 后面的部分，比如 "
+             "\"compute instances list\"、\"storage ls\"。", {"args": {"type": "string"}}),
+        tool("google_api", "用人连接的 Google 服务账号调用 Google API（Drive、Docs、Sheets、Cloud）：url 是完整地址，"
+             "比如 https://www.googleapis.com/drive/v3/files?q=… 或 https://docs.googleapis.com/v1/documents/<id>。"
+             "服务账号只看得到共享给它的文件。", {"method": {"type": "string"}, "url": {"type": "string"},
+                                          "body": {"type": "object"}}, required=["method", "url"])],
+    "cloudflare": [tool("cloudflare", "调用 Cloudflare API（https://api.cloudflare.com/client/v4 下的 path），比如 "
+                        "GET /zones、GET /zones/<id>/dns_records、POST /zones/<id>/dns_records。", _HTTP,
+                        required=["method", "path"])],
+    "godaddy": [tool("godaddy", "调用 GoDaddy API（https://api.godaddy.com 下的 path），比如 GET /v1/domains、"
+                     "GET /v1/domains/<域名>/records、PATCH /v1/domains/<域名>/records。", _HTTP,
+                     required=["method", "path"])],
+}
+INTEGRATION_STEP = {"github": "github", "email_search": "email", "email_read": "email", "email_send": "email",
+                    "slack": "slack", "gcloud": "google", "google_api": "google", "cloudflare": "cloudflare",
+                    "godaddy": "godaddy"}
+INTEGRATION_RULES = """
+你还能用人连接的这些工具（由 Continuum 代为调用，凭据不在你这里）：{names}。
+发邮件、发 Slack 消息、改 DNS 记录、改 GitHub 上的东西这类会对外产生影响的操作，只在请求明确要求时做，做之前想清楚范围。
+"""
+
 APPROVAL_TIMEOUT = 30 * 60
 SSH_COMMAND_TIMEOUT = 300
 
@@ -159,7 +201,8 @@ DELEGATING = """
 ENDS_TURN = {"ready", "blocked", "failed", "dropped"}
 # The tools whose work a person sees as steps of the turn; the rest are the worker's calls to the host, whose words
 # reach the person as messages.
-SHOWN = {"shell", "read_file", "write_file", "list_files", "claude_code", "codex", "ssh", "dispatch"}
+SHOWN = {"shell", "read_file", "write_file", "list_files", "claude_code", "codex", "ssh", "dispatch",
+         *INTEGRATION_STEP}
 SHOWN_OUTPUT = 4000
 
 
@@ -232,6 +275,17 @@ class _Live:
         if text and text != self.sent and (final or now - self.last >= self.every):
             self.sent, self.last = text, now
             self.job.activity({"type": "stream", "text": text})
+
+
+def _integrations_for(ctx: Any, job: Any) -> tuple[Any, list[str]]:
+    """The person's connected tools, for someone allowed to use them ([ssh] admins), in a fixed order."""
+    found = getattr(ctx, "integrations", None)
+    ssh = getattr(ctx, "ssh", None)
+    admins = ssh.settings.admins if ssh is not None else []
+    if found is None or getattr(job, "requester", None) not in admins:
+        return None, []
+    connected = found.connected()
+    return found, [k for k in INTEGRATION_TOOLS if k in connected]
 
 
 def _ssh_for(ctx: Any, job: Any) -> Any:
@@ -319,8 +373,10 @@ class AgentExecutor:
         job.projects = getattr(ctx, "projects", None)
         job.crew = getattr(ctx, "crew", None)
         job.model = model
+        job.integrations, connected = _integrations_for(ctx, job)
         tools = [*TOOLS, *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
-                 *(PROJECT_TOOLS if job.projects else []), *([DISPATCH] if job.crew else [])]
+                 *(PROJECT_TOOLS if job.projects else []), *([DISPATCH] if job.crew else []),
+                 *(t for kind in connected for t in INTEGRATION_TOOLS[kind])]
         if not messages:
             system = SYSTEM + (DELEGATING.format(names="、".join(delegates)) if delegates else "")
             system += SSH_RULES if job.ssh else ""
@@ -330,6 +386,7 @@ class AgentExecutor:
                 local = datetime.now(UTC).astimezone(zone(tz))
                 system += PROJECT_RULES.format(tz=tz, now=local.strftime("%Y-%m-%d %H:%M %A"))
             system += LEAD_RULES.format(most=MAX_DISPATCH) if job.crew else ""
+            system += INTEGRATION_RULES.format(names="、".join(connected)) if connected else ""
             system += f"\n团队的要求：\n{config.instructions}\n" if config.instructions else ""
             messages = [{"role": "system", "content": system}, {"role": "user", "content": job.assignment}]
         job.workdir.mkdir(parents=True, exist_ok=True)
@@ -396,6 +453,8 @@ class AgentExecutor:
             return await self._ssh(job, key, args), False
         if name == "dispatch":
             return await self._dispatch(job, config, key, args), False
+        if name in INTEGRATION_STEP:
+            return await self._integration(job, key, name, args), False
         step = {"type": "step", "key": key, "name": name, "input": _step_input(name, args)}
         job.activity({**step, "status": "running", "output": ""})
         result, ends = await self._call(job, config, name, args)
@@ -436,13 +495,60 @@ class AgentExecutor:
         job.activity({**step, "status": "done", "output": _clip(result)})
         return result if len(result) <= 20000 else result[:20000] + "\n...[后面截断]"
 
+    async def _integration(self, job, key: str, name: str, args: dict[str, Any]) -> str:
+        """One call of a connected tool, run by the host; shown as a step."""
+        found = getattr(job, "integrations", None)
+        summary = {"github": lambda a: f"gh {a.get('args', '')}",
+                   "email_search": lambda a: f"搜索 {a.get('query', '')}", "email_read": lambda a: f"读 uid {a.get('uid')}",
+                   "email_send": lambda a: f"发给 {a.get('to')}：{a.get('subject', '')}",
+                   "slack": lambda a: f"{a.get('method')} {json.dumps(a.get('params') or {}, ensure_ascii=False)[:80]}",
+                   "gcloud": lambda a: f"gcloud {a.get('args', '')}",
+                   "google_api": lambda a: f"{a.get('method', 'GET')} {a.get('url', '')}",
+                   "cloudflare": lambda a: f"{a.get('method', 'GET')} {a.get('path', '')}",
+                   "godaddy": lambda a: f"{a.get('method', 'GET')} {a.get('path', '')}"}[name](args)
+        step = {"type": "step", "key": key, "name": INTEGRATION_STEP[name], "input": summary[:300]}
+        job.activity({**step, "status": "running", "output": ""})
+        try:
+            if found is None:
+                raise ValueError("这个工具没有连接")
+            if "_invalid" in args:
+                raise ValueError(f"参数不是合法的 JSON：{args['_invalid'][:200]}")
+            if name == "github":
+                result = await found.github(str(args.get("args", "")))
+            elif name == "email_search":
+                result = await found.email_search(str(args.get("query", "")), str(args.get("folder") or "INBOX"),
+                                                  int(args.get("limit") or 20))
+            elif name == "email_read":
+                result = await found.email_read(str(args.get("uid", "")), str(args.get("folder") or "INBOX"))
+            elif name == "email_send":
+                result = await found.email_send(str(args.get("to", "")), str(args.get("subject", "")),
+                                                str(args.get("body", "")), str(args.get("cc") or ""))
+            elif name == "slack":
+                result = await found.slack(str(args.get("method", "")), args.get("params") or {})
+            elif name == "gcloud":
+                result = await found.gcloud(str(args.get("args", "")))
+            elif name == "google_api":
+                result = await found.google_api(str(args.get("method", "GET")), str(args.get("url", "")),
+                                                args.get("body"))
+            else:
+                result = await found.api(name, str(args.get("method", "GET")), str(args.get("path", "")),
+                                         args.get("body"))
+            result = found.scrub(result)
+            failed = result.startswith(("[exit code 1", "[exit code 2", "[HTTP 4", "[HTTP 5"))
+        except Exception as error:  # noqa: BLE001 - the worker reads what went wrong and decides
+            result, failed = f"错误：{error}", True
+        job.activity({**step, "status": "error" if failed else "done", "output": _clip(result)})
+        return result
+
     async def _subwork(self, job, config: AgentConfig, number: int, label: str, task: str,
                        entry: dict[str, Any]) -> str:
         """One sub-worker: the same tools as its lead for doing things, none for talking to the person."""
         sub = _Crewed(job, label, number, entry)
         model = job.model
         delegates = config.delegates()
-        tools = [*TOOLS[:4], *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []), FINISH]
+        connected = job.integrations.connected() if getattr(job, "integrations", None) else set()
+        tools = [*TOOLS[:4], *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
+                 *(t for kind in INTEGRATION_TOOLS if kind in connected for t in INTEGRATION_TOOLS[kind]), FINISH]
         system = SUB_SYSTEM.format(folder=f"sub-{number}") + (SSH_RULES if job.ssh else "")
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},

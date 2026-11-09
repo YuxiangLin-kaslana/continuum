@@ -280,6 +280,33 @@ def test_the_settings_page_adds_tests_and_removes_ssh_servers():
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-settings.png", full_page=True)
 
+        # The person's other tools: connect one, and its secret never shows again.
+        page.wait_for_selector(".card.tool[data-tool=github]")
+        assert page.locator(".card.tool").count() == 6
+        github = page.locator(".card.tool[data-tool=github]")
+        github.get_by_role("button", name="连接").click()
+        assert "Personal access tokens" in github.inner_text()
+        github.locator("input[type=password]").fill("ghp_secret")
+        github.get_by_role("button", name="保存并测试").click()
+        page.wait_for_selector(".card.tool.ok[data-tool=github]")
+        assert "YuxiangLin-kaslana" in page.inner_text(".card.tool[data-tool=github]")
+        assert "ghp_secret" not in page.content() and page.evaluate("window.__fake.savedTools.github.token") == "ghp_secret"
+        page.locator(".card.tool[data-tool=github]").get_by_role("button", name="修改").click()
+        assert page.get_attribute(".card.tool[data-tool=github] input[type=password]", "placeholder") == "已保存（留空不改）"
+        page.locator(".card.tool[data-tool=github]").get_by_role("button", name="取消").click()
+        email = page.locator(".card.tool[data-tool=email]")
+        email.get_by_role("button", name="连接").click()
+        assert email.locator("label", has_text="收信服务器").is_hidden()
+        email.locator("select").select_option("custom")
+        assert email.locator("label", has_text="收信服务器").is_visible()
+        email.get_by_role("button", name="取消").click()
+        off = page.locator(".card.tool[data-tool=github]").get_by_role("button", name="断开")
+        off.click()
+        page.locator(".card.tool[data-tool=github]").get_by_role("button", name="确认断开？").click()
+        page.wait_for_selector(".card.tool.untested[data-tool=github]")
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-tools.png", full_page=True)
+
         # One choice for every server, asked twice.
         page.select_option("#ssh-bulk", "auto")
         page.click("#ssh-bulk-apply")
