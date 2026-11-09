@@ -135,6 +135,16 @@ DISPATCH = tool(
     required=["tasks"])
 FINISH = tool("finish", "子任务做完（或做不成）时调用；summary 交回给负责人，要具体：数字、路径、结论，做不成写原因。",
               {"summary": {"type": "string"}})
+HOST_RULES = """
+【这台机器的完全权限】人给了你这台机器（Continuum 自己运行的主机）的完全权限，上面说的沙箱、/work 限制和“没有网络”
+都不适用：shell 命令以 {user} 的身份直接在主机上执行，有网络，可以 sudo，能读写整个文件系统，能用本机装好的
+gcloud、aws、gh、docker、git、systemctl 等，也能改 Continuum 自己的代码（{code}）和配置（{home}）。
+命令开始时的目录是本工单的工作目录 {workdir}；read_file / write_file / list_files 可以用绝对路径访问任何文件，
+相对路径相对于工作目录。产物仍放在工作目录里。
+人要你在这台机器上做的事就直接做，不要说做不到、也不要让人自己去跑命令。改系统、删东西、重启服务这类有影响的
+操作，在汇报里说清做了什么、怎么撤回。重启 Continuum 自己（systemctl --user restart continuum）会打断你这一轮，
+要放在最后做，并先把要汇报的话准备好。
+"""
 LEAD_RULES = """
 你是这件事的负责人。能拆成互不依赖、可以同时做的几部分的（比如查多台服务器、比较多个方案、处理多个文件），
 用 dispatch 一次派给多个 Worker 同时去做（一次最多 {most} 个），然后检查它们交回的结果、必要时补做，最后汇总成
@@ -247,12 +257,33 @@ def transcript_path(workdir: Path) -> Path:
     return workdir.with_name(workdir.name + ".agent.json")
 
 
-def _inside(workdir: Path, path: str) -> Path:
+def _inside(workdir: Path, path: str, anywhere: bool = False) -> Path:
+    if anywhere and path.startswith(("/", "~")) and not path.startswith("/work"):
+        return Path(path).expanduser()
     relative = path.removeprefix("/work").lstrip("/") if path.startswith("/work") else path
     target = (workdir / (relative or ".")).resolve()
     if target != workdir.resolve() and workdir.resolve() not in target.parents:
         raise ValueError(f"{path} is outside /work")
     return target
+
+
+HOST_SHELL = tool("shell", "在这台主机上直接执行一条 shell 命令（有网络、可以 sudo），从本工单的工作目录开始。"
+                          "返回退出码和输出。", {"command": {"type": "string"}})
+
+
+def _basic(config: AgentConfig) -> list[dict[str, Any]]:
+    """The shell and file tools, the shell described as what it is."""
+    return [HOST_SHELL, *TOOLS[1:]] if config.sandbox.kind == "host" else TOOLS
+
+
+def _host_rules(config: AgentConfig, job: Any) -> str:
+    if config.sandbox.kind != "host":
+        return ""
+    import getpass
+
+    code = Path(__file__).resolve().parents[3]
+    return HOST_RULES.format(user=getpass.getuser(), code=code, home=job.workdir.resolve().parents[1],
+                             workdir=job.workdir.resolve())
 
 
 def _clip(text: str, limit: int = SHOWN_OUTPUT) -> str:
@@ -402,7 +433,7 @@ class AgentExecutor:
         def offered() -> list[dict[str, Any]]:
             # Asked again at every step: a tool the person connects during the turn can be used at once.
             now_connected = [k for k in INTEGRATION_TOOLS if job.integrations and k in job.integrations.connected()]
-            return [*TOOLS, *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
+            return [*_basic(config), *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
                     *(PROJECT_TOOLS if job.projects else []), *([DISPATCH] if job.crew else []),
                     *(t for kind in now_connected for t in INTEGRATION_TOOLS[kind]),
                     *([REQUEST_TOOL] if job.integrations is not None and job.projects is not None else [])]
@@ -415,6 +446,7 @@ class AgentExecutor:
                 local = datetime.now(UTC).astimezone(zone(tz))
                 system += PROJECT_RULES.format(tz=tz, now=local.strftime("%Y-%m-%d %H:%M %A"))
             system += LEAD_RULES.format(most=MAX_DISPATCH) if job.crew else ""
+            system += _host_rules(config, job)
             if job.integrations is not None:
                 missing = [TOOL_KINDS[k] for k in TOOL_KINDS if k not in connected]
                 def named(kind: str) -> str:
@@ -621,9 +653,9 @@ class AgentExecutor:
         model = job.model
         delegates = getattr(job, "delegates", None) or {}
         connected = job.integrations.connected() if getattr(job, "integrations", None) else set()
-        tools = [*TOOLS[:4], *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
+        tools = [*_basic(config)[:4], *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
                  *(t for kind in INTEGRATION_TOOLS if kind in connected for t in INTEGRATION_TOOLS[kind]), FINISH]
-        system = SUB_SYSTEM.format(folder=f"sub-{number}") + (SSH_RULES if job.ssh else "")
+        system = SUB_SYSTEM.format(folder=f"sub-{number}") + (SSH_RULES if job.ssh else "") + _host_rules(config, job)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
             {"role": "user", "content": f"项目背景：\n{job.assignment}\n\n你的子任务（{label}）：\n{task}"}]
@@ -690,16 +722,17 @@ class AgentExecutor:
                 result = await sandbox.run(str(args.get("command", "")), job.workdir, config.sandbox)
                 return result.text(), False
             if name == "read_file":
-                target = _inside(job.workdir, str(args.get("path", "")))
+                target = _inside(job.workdir, str(args.get("path", "")), config.sandbox.kind == "host")
                 text = target.read_text(encoding="utf-8", errors="replace")
                 return text if len(text) <= 20000 else text[:20000] + "\n...[后面截断]", False
             if name == "write_file":
-                target = _inside(job.workdir, str(args.get("path", "")))
+                target = _inside(job.workdir, str(args.get("path", "")), config.sandbox.kind == "host")
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(str(args.get("content", "")), encoding="utf-8")
-                return f"已写入 {target.relative_to(job.workdir.resolve())}", False
+                inside = job.workdir.resolve() in target.resolve().parents
+                return f"已写入 {target.relative_to(job.workdir.resolve()) if inside else target}", False
             if name == "list_files":
-                target = _inside(job.workdir, str(args.get("path") or "."))
+                target = _inside(job.workdir, str(args.get("path") or "."), config.sandbox.kind == "host")
                 entries = sorted(p.name + ("/" if p.is_dir() else "") for p in target.iterdir())
                 return "\n".join(entries) or "（空）", False
             if name in DELEGATE_TOOLS:

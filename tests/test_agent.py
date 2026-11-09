@@ -167,6 +167,37 @@ def test_the_model_router_accepts_and_the_agent_works_in_the_sandbox_and_deliver
     assert [m["role"] for m in saved][-2:] == ["assistant", "tool"]
 
 
+def test_given_the_whole_machine_the_worker_runs_on_the_host_and_reaches_any_file(tmp_path, monkeypatch):
+    """The person gave the workers this machine: a command runs on the host with its home and programs (but not the
+    service's keys), the file tools reach any path, and the worker is told it may."""
+    import os
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "must-not-leak")
+    elsewhere = tmp_path / "elsewhere" / "notes.txt"
+    router = ScriptedModel(call("decide", decision="accept", title="主机上做事", scope="看主机", reason="请求",
+                                acknowledgement="好。"))
+    worker = ScriptedModel(
+        call("shell", command="echo home=$HOME; env | grep -c must-not-leak; test -d /proc/1 && echo host"),
+        call("write_file", path=str(elsewhere), content="written from the worker"),
+        lambda messages: call("report", state="ready", summary=messages[-3]["content"].replace("\n", " ")))
+
+    async def main():
+        rt = agent_runtime(tmp_path / "home", router, worker, executor={"kind": "agent", "config": {
+            "model": "worker", "sandbox": {"kind": "host", "timeout_seconds": 10}}})
+        try:
+            post(tmp_path / "home", "在主机上看看")
+            await drive(rt, lambda: len(replies(tmp_path / "home")) == 2, timeout=15)
+        finally:
+            await rt.close()
+
+    asyncio.run(main())
+    said = replies(tmp_path / "home")[-1][1]
+    assert f"home={os.path.expanduser('~')}" in said and "\n0" in said.replace(" ", "\n") and "host" in said
+    assert elsewhere.read_text() == "written from the worker"
+    system = worker.seen[0][0]["content"]
+    assert "完全权限" in system and "可以 sudo" in system
+
+
 def test_the_agent_asks_a_question_and_goes_on_with_the_answer(tmp_path):
     router = ScriptedModel(call("decide", decision="accept", title="选封装", scope="定 R12 封装", reason="请求",
                                 acknowledgement="好，我来看 R12。"))

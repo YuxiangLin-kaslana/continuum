@@ -304,3 +304,21 @@ def test_a_mailbox_type_follows_its_address_and_a_refused_login_says_why(tmp_pat
     words = login_refused({"address": "me@hotmail.com", "preset": "outlook"}, refused)
     assert "b'" not in words and "OAuth" in words
     assert "apppasswords" in login_refused({"address": "me@example.com", "preset": "gmail"}, refused)
+
+
+def test_gcloud_runs_signed_in_as_the_persons_service_account(tmp_path):
+    """Seen live: the command's path was kept under the method's own name, so every gcloud call failed with
+    "'str' object is not callable"."""
+    script = tmp_path / "fake-gcloud"
+    script.write_text(f"#!{sys.executable}\nimport os, sys, json\n"
+                      "print(json.dumps({'argv': sys.argv[1:], 'config': os.environ.get('CLOUDSDK_CONFIG'),"
+                      "'project': os.environ.get('CLOUDSDK_CORE_PROJECT')}))\n")
+    script.chmod(0o755)
+    tools = Integrations(tmp_path / "home")
+    tools.gcloud_cli = str(script)
+    tools.save("google", {"key_json": json.dumps({"type": "service_account", "client_email": "bot@p.iam.gserviceaccount.com",
+                                                  "private_key": "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n"}),
+                          "project": "o2-prod"})
+    out = json.loads(asyncio.run(tools.gcloud("gcloud compute instances list")).split("\n", 1)[1])
+    assert out["argv"] == ["compute", "instances", "list", "--quiet"] and out["project"] == "o2-prod"
+    assert out["config"].startswith(str(tmp_path / "home"))

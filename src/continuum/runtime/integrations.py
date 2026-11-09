@@ -140,7 +140,7 @@ class Integrations:
         self._google_token: dict[str, tuple[str, float]] = {}
         # The commands, so tests can stand in for them.
         self.gh = "gh"
-        self.gcloud = "gcloud"
+        self.gcloud_cli = "gcloud"
         self.aws_cli = "aws"
 
     # --- what is kept: per tool, a list of accounts, each with its own name, credentials and last test ---
@@ -674,7 +674,7 @@ class Integrations:
         if not argv:
             raise IntegrationError("要给 gcloud 的参数，比如 \"compute instances list\"")
         env = await self._gcloud_env()
-        code, output = await self._command([self.gcloud, *argv, "--quiet"], env, timeout=180)
+        code, output = await self._command([self.gcloud_cli, *argv, "--quiet"], env, timeout=180)
         return _clip(f"[exit code {code}]\n{output}")
 
     async def _gcloud_env(self) -> dict[str, str]:
@@ -692,7 +692,7 @@ class Integrations:
                 json.dump(key, handle)
             try:
                 code, output = await self._command(
-                    [self.gcloud, "auth", "activate-service-account", f"--key-file={handle.name}", "--quiet"], env,
+                    [self.gcloud_cli, "auth", "activate-service-account", f"--key-file={handle.name}", "--quiet"], env,
                     timeout=60)
             finally:
                 os.unlink(handle.name)

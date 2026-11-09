@@ -3,12 +3,16 @@
 With bubblewrap, a command sees the system's programs read-only, its ticket's workspace as `/work` (read-write), a
 private `/tmp`, and nothing else of the host: no home directory, no other tickets, no network unless allowed. It gets
 a minimal environment, so no key or token of the host reaches it. A command that runs too long is killed.
+
+With `host`, the person has given the workers the whole machine: a command runs on the host as the service's user,
+with its home, its programs, the network and whatever that user may do (sudo included), starting in the workspace.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import signal
 from pathlib import Path
@@ -26,8 +30,9 @@ ENV = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/work", "LANG": "C.UTF-8
 
 
 class SandboxConfig(BaseModel):
-    # `bwrap` isolates each command; `none` runs it directly in the workspace and is for trusted setups only.
-    kind: Literal["bwrap", "none"] = "bwrap"
+    # `bwrap` isolates each command; `none` runs it directly in the workspace and is for trusted setups only;
+    # `host` gives it the whole machine as the service's user (home, network, sudo).
+    kind: Literal["bwrap", "none", "host"] = "bwrap"
     network: bool = False
     timeout_seconds: float = Field(default=120, gt=0, le=3600)
     max_output: int = Field(default=12000, ge=1000)
@@ -43,6 +48,20 @@ class CommandResult(BaseModel):
     def text(self) -> str:
         head = "timed out and was killed" if self.timed_out else f"exit code {self.exit_code}"
         return f"[{head}]\n{self.output}"
+
+
+# The service's own keys stay out of a command's environment even on the host (they are still in their files).
+SECRET_NAME = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL", re.IGNORECASE)
+
+
+def host_env() -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if not SECRET_NAME.search(k)}
+    home = os.path.expanduser("~")
+    extra = [f"{home}/.npm-global/bin", f"{home}/.local/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin"]
+    path = env.get("PATH", "").split(":")
+    env["PATH"] = ":".join([*path, *(p for p in extra if p not in path)]).strip(":")
+    env.update({"HOME": home, "LANG": env.get("LANG", "C.UTF-8")})
+    return env
 
 
 def available() -> bool:
@@ -83,6 +102,8 @@ async def run(command: str, workdir: Path, config: SandboxConfig) -> CommandResu
     env = dict(ENV)
     if config.kind == "none":
         env["HOME"] = str(workdir)
+    elif config.kind == "host":
+        env = host_env()
     process = await asyncio.create_subprocess_exec(
         *argv, cwd=cwd, env=env, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT, start_new_session=True)
