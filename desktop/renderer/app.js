@@ -1171,12 +1171,21 @@
       fields: [['access_key_id', 'Access Key ID', 'password'], ['secret_access_key', 'Secret Access Key', 'password'],
         ['region', '默认区域', 'text']] },
   };
-  function toolForm(t, form, done) {
+  // The form for one account of a tool: `target` says which (`account_id`), or that it is a new one.
+  function toolForm(t, form, done, target = { new: true }) {
     const box = el('form', 'tool-form');
     box.noValidate = true;
     box.append(el('p', 'hint', form.hint));
     const grid = el('div', 'form-grid');
     const inputs = {};
+    const name = el('label', 'wide');
+    name.append(document.createTextNode('账号名字（比如“公司”“个人”，用来区分多个账号）'));
+    inputs.label = el('input');
+    inputs.label.maxLength = 40;
+    inputs.label.value = target.label || '';
+    inputs.label.placeholder = '不填就叫“默认”“账号 2”…';
+    name.append(inputs.label);
+    grid.append(name);
     for (const [key, label, type, only] of form.fields) {
       const wrap = el('label', type === 'textarea' || key === 'address' ? 'wide' : '');
       wrap.append(document.createTextNode(label));
@@ -1225,13 +1234,14 @@
     box.append(grid, error, actions);
     box.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const fields = {};
+      const fields = target.account_id ? { account_id: target.account_id } : { new: true };
       for (const [key, input] of Object.entries(inputs)) if (input.value !== '') fields[key] = input.value;
       save.disabled = true;
       save.textContent = '测试中…';
       try {
         const updated = await call('toolSave', t.kind, fields);
-        if (!(updated.test || {}).ok) throw new Error((updated.test || {}).message || '没连上');
+        const saved = (updated.accounts || []).find((a) => a.id === updated.saved) || updated;
+        if (!(saved.test || {}).ok) throw new Error((saved.test || {}).message || '没连上');
         done(updated);
       } catch (err) {
         error.textContent = err.message;
@@ -1272,7 +1282,7 @@
       desc: '用你给的 Access Key 执行 aws 命令，不用服务器自己的 AWS 身份。',
       can: ['查 EC2、S3、Route 53 等资源', '改资源（你明确要求、且密钥有权限时）'] },
   ];
-  const toolsTab = { selected: 'ssh', integrations: [], agents: [], hosts: [], admin: true };
+  const toolsTab = { selected: 'ssh', integrations: [], agents: [], hosts: [], admin: true, editing: null };
 
   async function loadToolsTab() {
     const [integrations, agents, sshPage] = await Promise.all([
@@ -1301,9 +1311,11 @@
       return { ready: agent.enabled, text: agent.enabled ? '已启用' : '已停用' };
     }
     const t = toolsTab.integrations.find((x) => x.kind === id) || {};
-    if (!t.connected) return { ready: false, text: '没有连接' };
-    if ((t.test || {}).ok === false) return { ready: false, text: '连不上' };
-    return { ready: true, text: '已连接' };
+    const accounts = t.accounts || [];
+    if (!t.connected || !accounts.length) return { ready: false, text: '没有连接' };
+    const broken = accounts.filter((a) => (a.test || {}).ok === false).length;
+    if (broken === accounts.length) return { ready: false, text: '连不上' };
+    return { ready: true, text: accounts.length > 1 ? `${accounts.length} 个账号${broken ? `，${broken} 个连不上` : ''}` : '已连接' };
   }
 
   // A tool's own mark: the brand's logo where there is one, a plain drawing for SSH and email, letters otherwise.
@@ -1353,7 +1365,12 @@
         const words = el('span', 'tool-words');
         words.append(el('b', '', entry.name), el('span', 'tool-state', status.text));
         button.append(toolIcon(entry), words, el('span', `tool-dot${status.ready ? ' on' : ''}`));
-        button.addEventListener('click', () => { toolsTab.selected = entry.id; renderToolList(); renderToolDetail(); });
+        button.addEventListener('click', () => {
+          toolsTab.selected = entry.id;
+          toolsTab.editing = null;
+          renderToolList();
+          renderToolDetail();
+        });
         li.append(button);
         items.push(li);
       }
@@ -1422,49 +1439,70 @@
   }
 
   function integrationDetail(entry) {
-    const t = toolsTab.integrations.find((x) => x.kind === entry.id) || { kind: entry.id, connected: false, settings: {} };
+    const t = toolsTab.integrations.find((x) => x.kind === entry.id) || { kind: entry.id, connected: false, accounts: [] };
     const form = TOOL_FORMS[entry.id];
-    const nodes = [];
-    const test = t.test || {};
-    if (t.connected) {
-      const detail = el('dl', 'detail');
-      const row = (label, value, cls = '') => { if (value) detail.append(el('dt', '', label), el('dd', cls, value)); };
-      row('账号', t.account);
-      if (t.settings && t.settings.address) row('邮箱', t.settings.address);
-      if (t.settings && t.settings.client_email) row('服务账号', t.settings.client_email);
-      if (test.at) row('上次测试', `${test.ok ? '通过' : test.message}（${day(test.at)} ${time(test.at)}）`, test.ok ? '' : 'question');
-      const actions = el('div', 'actions');
-      const again = el('button', 'outline', '测试');
-      again.addEventListener('click', async () => {
-        again.disabled = true;
-        try {
-          const updated = await call('toolTest', entry.id);
-          toolsTab.integrations = toolsTab.integrations.map((x) => (x.kind === entry.id ? updated : x));
-        } catch (error) {
-          showStatus(error.message);
-        }
-        renderToolList();
-        renderToolDetail();
-      });
-      const off = el('button', 'outline danger', '断开');
-      off.addEventListener('click', async () => {
-        if (!off.dataset.confirm) { off.dataset.confirm = '1'; off.textContent = '确认断开？'; return; }
-        try {
-          await call('toolRemove', entry.id);
-        } catch (error) {
-          showStatus(error.message);
-        }
-        await loadToolsTab();
-      });
-      actions.append(again, off);
-      nodes.push(el('h3', 'tool-sub', '状态'), detail, actions);
-    }
-    nodes.push(el('h3', 'tool-sub', t.connected ? '修改凭据' : '连接'));
-    nodes.push(toolForm(t, form, async (updated) => {
+    const accounts = t.accounts || [];
+    const nodes = [el('h3', 'tool-sub', accounts.length ? `账号 ${pad(accounts.length)}` : '连接')];
+    const refresh = (updated) => {
       if (updated) toolsTab.integrations = toolsTab.integrations.map((x) => (x.kind === entry.id ? updated : x));
+      toolsTab.editing = null;
       renderToolList();
       renderToolDetail();
-    }));
+    };
+    for (const a of accounts) {
+      const test = a.test || {};
+      const card = el('article', `card notched host tool-account ${test.ok === false ? 'bad' : 'ok'}`);
+      card.dataset.account = a.id;
+      const top = el('div', 'card-top');
+      top.append(el('span', 'ticket-id', a.id), el('span', 'stage', test.ok === false ? '连不上' : '已连接'));
+      card.append(top, el('div', 'card-title', a.label));
+      const detail = el('dl', 'detail');
+      const row = (label, value, cls = '') => { if (value) detail.append(el('dt', '', label), el('dd', cls, value)); };
+      row('账号', a.account);
+      if (a.settings && a.settings.address) row('邮箱', a.settings.address);
+      if (a.settings && a.settings.client_email) row('服务账号', a.settings.client_email);
+      if (test.at) row('上次测试', `${test.ok ? '通过' : test.message}（${day(test.at)} ${time(test.at)}）`, test.ok ? '' : 'question');
+      card.append(detail);
+      if (toolsTab.editing === a.id) {
+        card.append(toolForm({ kind: entry.id, connected: true, settings: a.settings || {} }, form, refresh,
+          { account_id: a.id, label: a.label }));
+      } else {
+        const actions = el('div', 'actions');
+        const again = el('button', 'outline', '测试');
+        again.addEventListener('click', async () => {
+          again.disabled = true;
+          try {
+            refresh(await call('toolTest', entry.id, a.id));
+          } catch (error) {
+            showStatus(error.message);
+            again.disabled = false;
+          }
+        });
+        const change = el('button', 'outline', '修改');
+        change.addEventListener('click', () => { toolsTab.editing = a.id; renderToolDetail(); });
+        const off = el('button', 'outline danger', '断开');
+        off.addEventListener('click', async () => {
+          if (!off.dataset.confirm) { off.dataset.confirm = '1'; off.textContent = '确认断开？'; return; }
+          try {
+            await call('toolRemove', entry.id, a.id);
+          } catch (error) {
+            showStatus(error.message);
+          }
+          await loadToolsTab();
+        });
+        actions.append(again, change, off);
+        card.append(actions);
+      }
+      nodes.push(card);
+    }
+    if (!accounts.length || toolsTab.editing === 'new') {
+      if (accounts.length) nodes.push(el('h3', 'tool-sub', '添加账号'));
+      nodes.push(toolForm({ kind: entry.id, connected: false, settings: {} }, form, refresh, { new: true }));
+    } else {
+      const add = el('button', 'outline amber add-account', '＋ 添加账号');
+      add.addEventListener('click', () => { toolsTab.editing = 'new'; renderToolDetail(); });
+      nodes.push(add);
+    }
     return nodes;
   }
 

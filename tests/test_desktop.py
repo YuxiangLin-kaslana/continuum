@@ -284,16 +284,27 @@ def test_the_settings_page_adds_tests_and_removes_ssh_servers():
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-settings.png", full_page=True)
 
-        # Another tool: connect it on its page, and its secret never shows again.
+        # Another tool: connect an account on its page, and its secret never shows again.
         page.click("#tool-list [data-tool=github]")
         assert page.is_hidden("#ssh-pane") and "Personal access tokens" in page.inner_text("#tool-pane")
         assert "查 PR、issue" in page.inner_text("#tool-pane .tool-can")
         page.fill("#tool-pane input[type=password]", "ghp_secret")
         page.click("#tool-pane >> text=保存并测试")
-        page.wait_for_selector("#tool-list [data-tool=github].ready")
+        page.wait_for_selector("#tool-pane .tool-account[data-account=default]")
         assert "YuxiangLin-kaslana" in page.inner_text("#tool-pane") and "已连接" in page.inner_text("#tool-list [data-tool=github]")
         assert "ghp_secret" not in page.content() and page.evaluate("window.__fake.savedTools.github.token") == "ghp_secret"
-        assert page.get_attribute("#tool-pane input[type=password]", "placeholder") == "已保存（留空不改）"
+        page.click("#tool-pane .tool-account >> text=修改")
+        assert page.get_attribute("#tool-pane .tool-account input[type=password]", "placeholder") == "已保存（留空不改）"
+        page.click("#tool-pane .tool-account >> text=取消")
+        # A second account, with a name of its own.
+        page.click("#tool-pane >> text=＋ 添加账号")
+        page.fill("#tool-pane .tool-form input >> nth=0", "个人")
+        page.fill("#tool-pane .tool-form input[type=password]", "ghp_home")
+        page.click("#tool-pane >> text=保存并测试")
+        page.wait_for_selector("#tool-pane .tool-account >> nth=1")
+        assert page.locator("#tool-pane .tool-account .card-title").all_inner_texts() == ["默认", "个人"]
+        assert page.inner_text("#tool-list [data-tool=github] .tool-state") == "2 个账号"
+        assert page.evaluate("window.__fake.savedTools.github")["new"] is True
         page.click("#tool-list [data-tool=email]")
         assert page.locator("#tool-pane label", has_text="收信服务器").is_hidden()
         page.select_option("#tool-pane select", "custom")
@@ -309,9 +320,10 @@ def test_the_settings_page_adds_tests_and_removes_ssh_servers():
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-tools.png")
         page.click("#tool-list [data-tool=github]")
-        page.click("#tool-pane >> text=断开")
-        page.click("#tool-pane >> text=确认断开？")
-        page.wait_for_selector("#tool-list [data-tool=github] >> text=没有连接")
+        page.click("#tool-pane .tool-account[data-account=default] >> text=断开")
+        page.click("#tool-pane .tool-account[data-account=default] >> text=确认断开？")
+        page.wait_for_selector("#tool-list [data-tool=github] >> text=已连接")
+        assert page.locator("#tool-pane .tool-account .card-title").all_inner_texts() == ["个人"]
         page.click("#tool-list [data-tool=ssh]")
         page.wait_for_selector("#ssh-admin:not([hidden])")
 

@@ -443,31 +443,37 @@ def create_app(rt: Runtime) -> FastAPI:
 
     @app.put("/api/v1/integrations/{kind}")
     async def connect_tool(kind: str, body: dict[str, Any], user: str = Depends(user_of)) -> dict[str, Any]:
+        """Connect an account: `account_id` updates that one, `new` adds one; with neither (as apps before accounts
+        sent it), the first account is updated, or one is added."""
         ssh_admin(user)
+        fields = {k: v for k, v in body.items() if k not in ("account_id", "new")}
         try:
-            rt.integrations.save(kind, body)
-            tested = await rt.integrations.test(kind)
+            existing = rt.integrations.accounts(kind)
+            target = body.get("account_id") or (None if body.get("new") or not existing else existing[0]["id"])
+            ident = rt.integrations.save(kind, fields, target)
+            tested = await rt.integrations.test(kind, ident)
         except IntegrationError as error:
             raise HTTPException(422, str(error)) from None
         view = tool_view(kind)
         if tested.get("ok"):
-            rt.executor.context.projects.tool_connected(user, kind, view.get("account"))
-        return view
+            account = next((a["account"] for a in view["accounts"] if a["id"] == ident), None)
+            rt.executor.context.projects.tool_connected(user, kind, account)
+        return {**view, "saved": ident}
 
     @app.post("/api/v1/integrations/{kind}/test")
-    async def test_tool(kind: str, user: str = Depends(user_of)) -> dict[str, Any]:
+    async def test_tool(kind: str, account: str | None = None, user: str = Depends(user_of)) -> dict[str, Any]:
         ssh_admin(user)
         try:
-            await rt.integrations.test(kind)
+            await rt.integrations.test(kind, account)
         except IntegrationError as error:
             raise HTTPException(409 if "没有连接" in str(error) else 404, str(error)) from None
         return tool_view(kind)
 
     @app.delete("/api/v1/integrations/{kind}")
-    async def disconnect_tool(kind: str, user: str = Depends(user_of)) -> dict[str, Any]:
+    async def disconnect_tool(kind: str, account: str | None = None, user: str = Depends(user_of)) -> dict[str, Any]:
         ssh_admin(user)
         try:
-            return {"removed": rt.integrations.remove(kind)}
+            return {"removed": rt.integrations.remove(kind, account)}
         except IntegrationError as error:
             raise HTTPException(404, str(error)) from None
 

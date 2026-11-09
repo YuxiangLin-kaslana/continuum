@@ -32,7 +32,7 @@ def test_credentials_are_kept_in_private_files_and_never_shown_back(tmp_path):
     assert stat.S_IMODE(path.stat().st_mode) == 0o600 and stat.S_IMODE(path.parent.stat().st_mode) == 0o700
     assert "ghp_secret" not in json.dumps(tools.view())
     # A secret left empty keeps the one already kept.
-    tools.save("github", {"token": ""})
+    tools.save("github", {"token": ""}, tools.accounts("github")[0]["id"])
     assert tools.get("github")["secrets"]["token"] == "ghp_secret"
     with pytest.raises(IntegrationError):
         tools.save("slack", {})
@@ -147,6 +147,16 @@ def test_the_settings_api_connects_tools_for_admins_only_and_never_returns_secre
                 page = await c.get("/api/v1/integrations", headers=me)
                 assert "ghp_secret" not in page.text and len(page.json()["tools"]) == 7
                 assert (await c.put("/api/v1/integrations/nothing", headers=me, json={})).status_code == 422
+                # A second account; an older app's call (no account named) still updates the first.
+                second = (await c.put("/api/v1/integrations/github", headers=me,
+                                      json={"token": "ghp_home", "label": "个人", "new": True})).json()
+                assert [x["label"] for x in second["accounts"]] == ["默认", "个人"] and second["saved"] != "default"
+                await c.put("/api/v1/integrations/github", headers=me, json={"token": "ghp_new"})
+                assert rt.integrations.get("github", "default")["secrets"]["token"] == "ghp_new"
+                tested = await c.post("/api/v1/integrations/github/test", headers=me, params={"account": "个人"})
+                assert tested.status_code == 200
+                gone = await c.delete("/api/v1/integrations/github", headers=me, params={"account": second["saved"]})
+                assert gone.json() == {"removed": True} and len(rt.integrations.accounts("github")) == 1
                 assert (await c.delete("/api/v1/integrations/github", headers=me)).json() == {"removed": True}
         finally:
             runner.cancel()
@@ -245,3 +255,34 @@ def test_a_worker_asks_for_a_tool_the_person_connects_it_on_the_card_and_the_wor
 
     asyncio.run(main())
     assert "github" in offered[1]  # offered as soon as it was connected, in the same turn
+
+
+
+def test_a_tool_holds_several_accounts_and_each_call_uses_the_one_named(tmp_path):
+    tools = Integrations(tmp_path)
+    tools.gh = fake_gh(tmp_path)
+    work = tools.save("github", {"token": "ghp_work", "label": "公司"})
+    home = tools.save("github", {"token": "ghp_home", "label": "个人"})
+    assert work != home and [a["label"] for a in tools.view()[0]["accounts"]] == ["公司", "个人"]
+    with pytest.raises(IntegrationError):
+        tools.save("github", {"token": "x", "label": "公司"})  # names are unique
+    token = lambda **kw: json.loads(asyncio.run(tools.github("api user", **kw)).split("\n", 1)[1])["token"]  # noqa: E731
+    assert token() == "ghp_work"  # the first, unless one is named
+    assert token(account="个人") == "ghp_home" and token(account=home) == "ghp_home"
+    with pytest.raises(IntegrationError) as missing:
+        asyncio.run(tools.github("api user", account="没有"))
+    assert "公司" in str(missing.value) and "个人" in str(missing.value)
+    assert asyncio.run(tools.test("github", home))["ok"] and tools.get("github", home)["test"]["ok"]
+    assert tools.get("github", work)["test"] is None
+    # Secrets of every account are masked.
+    assert tools.scrub("ghp_work ghp_home") == "*** ***"
+    assert tools.remove("github", work) and [a["label"] for a in tools.accounts("github")] == ["个人"]
+
+
+def test_a_tool_kept_before_accounts_becomes_the_default_account(tmp_path):
+    (tmp_path / "integrations").mkdir()
+    (tmp_path / "integrations" / "slack.json").write_text(json.dumps({"secrets": {"token": "xoxb-old"},
+                                                                      "settings": {}, "account": "bot"}))
+    tools = Integrations(tmp_path)
+    [only] = tools.accounts("slack")
+    assert only["id"] == "default" and only["label"] == "默认" and tools.connected() == {"slack"}

@@ -196,8 +196,10 @@ handle('api:tools', () => client.request('GET', '/api/v1/integrations'));
 handle('api:agents', () => client.request('GET', '/api/v1/agents'));
 handle('api:agentSwitch', (kind, enabled) => client.request('POST', `/api/v1/agents/${encodeURIComponent(kind)}`, { enabled }));
 handle('api:toolSave', (kind, fields) => client.request('PUT', `/api/v1/integrations/${encodeURIComponent(kind)}`, fields));
-handle('api:toolTest', (kind) => client.request('POST', `/api/v1/integrations/${encodeURIComponent(kind)}/test`));
-handle('api:toolRemove', (kind) => client.request('DELETE', `/api/v1/integrations/${encodeURIComponent(kind)}`));
+handle('api:toolTest', (kind, account) => client.request('POST',
+  `/api/v1/integrations/${encodeURIComponent(kind)}/test${account ? `?account=${encodeURIComponent(account)}` : ''}`));
+handle('api:toolRemove', (kind, account) => client.request('DELETE',
+  `/api/v1/integrations/${encodeURIComponent(kind)}${account ? `?account=${encodeURIComponent(account)}` : ''}`));
 handle('api:sshSave', (name, host) =>
   client.request('PUT', `/api/v1/ssh/hosts/${encodeURIComponent(name)}`, host));
 handle('api:sshDelete', (name) => client.request('DELETE', `/api/v1/ssh/hosts/${encodeURIComponent(name)}`));

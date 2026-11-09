@@ -195,11 +195,16 @@ REQUEST_TOOL = tool(
      "reason": {"type": "string", "description": "一句话：要它做什么、需要哪些权限（比如“读写 o2 仓库的 PR”）"}},
     required=["kind", "reason"])
 TOOL_WAIT = 30 * 60
+ACCOUNT = {"type": "string", "description": "可选：用哪个账号（账号名）；不写就用第一个"}
+for _tools in INTEGRATION_TOOLS.values():
+    for _tool in _tools:
+        _tool["function"]["parameters"]["properties"]["account"] = ACCOUNT
 INTEGRATION_STEP = {"aws": "aws", "github": "github", "email_search": "email", "email_read": "email", "email_send": "email",
                     "slack": "slack", "gcloud": "google", "google_api": "google", "cloudflare": "cloudflare",
                     "godaddy": "godaddy", "request_tool": "request_tool"}
 INTEGRATION_RULES = """
 人的其他工具（由 Continuum 代为调用，凭据不在你这里）：已连接：{connected}；没连接：{missing}。
+一个工具连了几个账号时，用 account 参数说用哪个（比如人说“用工作邮箱”就填那个账号名）；不写就用第一个。
 请求需要一个没连接（或连不上）的工具时，或者人让你“加上某个权限 / 连上某个账号”时，用 request_tool 向人要：说清要它做什么、
 需要哪些权限，人会在对话里的卡片里填凭据。不要让人把令牌、密码、密钥写在消息里；人如果写了，提醒他改到卡片里填，
 不要复述它们。
@@ -412,7 +417,11 @@ class AgentExecutor:
             system += LEAD_RULES.format(most=MAX_DISPATCH) if job.crew else ""
             if job.integrations is not None:
                 missing = [TOOL_KINDS[k] for k in TOOL_KINDS if k not in connected]
-                system += INTEGRATION_RULES.format(connected="、".join(TOOL_KINDS[k] for k in connected) or "无",
+                def named(kind: str) -> str:
+                    labels = [a["label"] for a in next(t for t in job.integrations.view() if t["kind"] == kind)["accounts"]]
+                    return f"{TOOL_KINDS[kind]}（账号：{'、'.join(labels)}）" if len(labels) > 1 else TOOL_KINDS[kind]
+
+                system += INTEGRATION_RULES.format(connected="、".join(named(k) for k in connected) or "无",
                                                    missing="、".join(missing) or "无")
             system += f"\n团队的要求：\n{config.instructions}\n" if config.instructions else ""
             messages = [{"role": "system", "content": system}, {"role": "user", "content": job.assignment}]
@@ -439,7 +448,12 @@ class AgentExecutor:
                 messages.append(kept)
                 calls = tool_calls(message)
                 if not calls:
-                    return  # it said something without acting: the turn ends, and the host reports it waiting
+                    # An answer written out instead of reported is still the answer: the person gets it. (Seen live:
+                    # DeepSeek wrote its finding as plain words, and it never reached the person.)
+                    words = (message.get("content") or "").strip()
+                    if words:
+                        job.report("ready", words)
+                    return
                 ended = False
                 for call_id, name, args in calls:
                     result, ends = await self._shown_call(job, config, call_id, name, args)
@@ -535,6 +549,9 @@ class AgentExecutor:
                    "godaddy": lambda a: f"{a.get('method', 'GET')} {a.get('path', '')}",
                    "aws": lambda a: f"aws {a.get('args', '')}",
                    "request_tool": lambda a: f"请你连接 {TOOL_KINDS.get(str(a.get('kind')), a.get('kind'))}"}[name](args)
+        which = str(args.get("account") or "") or None
+        if which and name != "request_tool":
+            summary = f"[{which}] {summary}"
         step = {"type": "step", "key": key, "name": INTEGRATION_STEP[name], "input": summary[:300]}
         job.activity({**step, "status": "running", "output": ""})
         try:
@@ -545,27 +562,28 @@ class AgentExecutor:
             if name == "request_tool":
                 result = await self._request_tool(job, found, args)
             elif name == "github":
-                result = await found.github(str(args.get("args", "")))
+                result = await found.github(str(args.get("args", "")), account=which)
             elif name == "aws":
-                result = await found.aws(str(args.get("args", "")))
+                result = await found.aws(str(args.get("args", "")), account=which)
             elif name == "email_search":
                 result = await found.email_search(str(args.get("query", "")), str(args.get("folder") or "INBOX"),
-                                                  int(args.get("limit") or 20))
+                                                  int(args.get("limit") or 20), account=which)
             elif name == "email_read":
-                result = await found.email_read(str(args.get("uid", "")), str(args.get("folder") or "INBOX"))
+                result = await found.email_read(str(args.get("uid", "")), str(args.get("folder") or "INBOX"),
+                                                account=which)
             elif name == "email_send":
                 result = await found.email_send(str(args.get("to", "")), str(args.get("subject", "")),
-                                                str(args.get("body", "")), str(args.get("cc") or ""))
+                                                str(args.get("body", "")), str(args.get("cc") or ""), account=which)
             elif name == "slack":
-                result = await found.slack(str(args.get("method", "")), args.get("params") or {})
+                result = await found.slack(str(args.get("method", "")), args.get("params") or {}, account=which)
             elif name == "gcloud":
-                result = await found.gcloud(str(args.get("args", "")))
+                result = await found.gcloud(str(args.get("args", "")), account=which)
             elif name == "google_api":
                 result = await found.google_api(str(args.get("method", "GET")), str(args.get("url", "")),
-                                                args.get("body"))
+                                                args.get("body"), account=which)
             else:
                 result = await found.api(name, str(args.get("method", "GET")), str(args.get("path", "")),
-                                         args.get("body"))
+                                         args.get("body"), account=which)
             result = found.scrub(result)
             failed = result.startswith(("[exit code 1", "[exit code 2", "[HTTP 4", "[HTTP 5"))
         except Exception as error:  # noqa: BLE001 - the worker reads what went wrong and decides

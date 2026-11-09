@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextvars
+import functools
 import email
 import email.header
 import email.utils
@@ -61,42 +63,108 @@ def _clip(text: str, limit: int = OUTPUT_LIMIT) -> str:
     return text if len(text) <= limit else text[:limit] + "\n…[后面截断]"
 
 
+# Which account each tool uses in the call under way (set by _scoped).
+_SELECTED: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar("integration_accounts", default=None)
+
+
+def _scoped(kind: str | None = None) -> Any:
+    """A tool call made with one account: `account=` names it (by id or name), or the first is used."""
+    def wrap(fn: Any) -> Any:
+        @functools.wraps(fn)
+        async def scoped(self: Integrations, *args: Any, account: str | None = None, **kwargs: Any) -> Any:
+            which = kind or args[0]
+            token = _SELECTED.set({**(_SELECTED.get() or {}), which: self._resolve(which, account)})
+            try:
+                return await fn(self, *args, **kwargs)
+            finally:
+                _SELECTED.reset(token)
+        return scoped
+    return wrap
+
+
+def _slug(label: str, taken: set[str]) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")[:24] or "account"
+    ident, n = base, 2
+    while ident in taken:
+        ident, n = f"{base}-{n}", n + 1
+    return ident
+
+
 class Integrations:
     def __init__(self, home: Path, transport: httpx.AsyncBaseTransport | None = None):
         self.home = home
         self.folder = home / "integrations"
         self._transport = transport
-        self._google_token: tuple[str, float] | None = None
+        # Google access tokens, by account, while they last.
+        self._google_token: dict[str, tuple[str, float]] = {}
         # The commands, so tests can stand in for them.
         self.gh = "gh"
         self.gcloud = "gcloud"
         self.aws_cli = "aws"
 
-    # --- what is kept ---
+    # --- what is kept: per tool, a list of accounts, each with its own name, credentials and last test ---
 
     def _path(self, kind: str) -> Path:
         if kind not in KINDS:
             raise IntegrationError(f"没有叫 {kind} 的工具")
         return self.folder / f"{kind}.json"
 
-    def get(self, kind: str) -> dict[str, Any] | None:
+    def accounts(self, kind: str) -> list[dict[str, Any]]:
         path = self._path(kind)
-        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+        if not path.exists():
+            return []
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if "accounts" in data:
+            return data["accounts"]
+        # One tool, one account, as first kept: it becomes the default account.
+        return [{"id": "default", "label": "默认", **data}] if data.get("secrets") else []
 
-    def _write(self, kind: str, body: dict[str, Any]) -> None:
+    def _store(self, kind: str, accounts: list[dict[str, Any]]) -> None:
         self.folder.mkdir(mode=0o700, parents=True, exist_ok=True)
         path = self._path(kind)
         tmp = path.with_suffix(".tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(body, handle, ensure_ascii=False)
+            json.dump({"accounts": accounts}, handle, ensure_ascii=False)
         tmp.replace(path)
+
+    def _resolve(self, kind: str, which: str | None) -> str:
+        """The id of the account to use: the one named (by id or name), or the first."""
+        found = [a for a in self.accounts(kind) if a.get("secrets")]
+        if not found:
+            raise IntegrationError(f"{NAMES[kind]} 还没有连接")
+        if not which:
+            return found[0]["id"]
+        for a in found:
+            if which in (a["id"], a.get("label")) or which.casefold() == str(a.get("label", "")).casefold():
+                return a["id"]
+        raise IntegrationError(f"{NAMES[kind]} 没有叫“{which}”的账号；有：{'、'.join(a.get('label', a['id']) for a in found)}")
+
+    def get(self, kind: str, which: str | None = None) -> dict[str, Any] | None:
+        """An account: the one this call is scoped to, the one named, or the first."""
+        chosen = which or (_SELECTED.get() or {}).get(kind)
+        found = self.accounts(kind)
+        for a in found:
+            if chosen in (a["id"], a.get("label")):
+                return a
+        return found[0] if found else None
+
+    def _write(self, kind: str, body: dict[str, Any]) -> None:
+        found = self.accounts(kind)
+        for i, a in enumerate(found):
+            if a["id"] == body["id"]:
+                found[i] = body
+                break
+        else:
+            found.append(body)
+        self._store(kind, found)
 
     def scrub(self, text: str) -> str:
         """Any kept secret that shows up in what a tool said is masked, whatever tool said it."""
         for kind in KINDS:
-            for value in _secret_values((self.get(kind) or {}).get("secrets") or {}):
-                text = text.replace(value, "***")
+            for account in self.accounts(kind):
+                for value in _secret_values(account.get("secrets") or {}):
+                    text = text.replace(value, "***")
         return text
 
     # --- switches for the coding agents a worker may hand work to (Claude Code, Codex): on unless turned off ---
@@ -113,20 +181,29 @@ class Integrations:
         path.write_text(json.dumps(found), encoding="utf-8")
 
     def connected(self) -> set[str]:
-        return {k for k in KINDS if (self.get(k) or {}).get("secrets")}
+        return {k for k in KINDS if any(a.get("secrets") for a in self.accounts(k))}
 
     def view(self) -> list[dict[str, Any]]:
-        """What a client may see: whether each tool is connected, with whom, and how its last test went."""
+        """What a client may see: each tool's accounts, with whom each connects and how its last test went."""
         out = []
         for kind in KINDS:
-            body = self.get(kind) or {}
-            out.append({"kind": kind, "connected": bool(body.get("secrets")), "account": body.get("account"),
-                        "settings": body.get("settings", {}), "test": body.get("test")})
+            accounts = [{"id": a["id"], "label": a.get("label", a["id"]), "account": a.get("account"),
+                         "settings": a.get("settings", {}), "test": a.get("test")}
+                        for a in self.accounts(kind) if a.get("secrets")]
+            first = accounts[0] if accounts else {}
+            out.append({"kind": kind, "connected": bool(accounts), "accounts": accounts,
+                        "account": first.get("account"), "settings": first.get("settings", {}),
+                        "test": first.get("test")})
         return out
 
-    def save(self, kind: str, fields: dict[str, Any]) -> None:
-        """Keep a tool's credentials and settings; a secret left empty keeps the one already kept."""
-        old = self.get(kind) or {}
+    def save(self, kind: str, fields: dict[str, Any], account_id: str | None = None) -> str:
+        """Keep an account's credentials and settings (a new account when `account_id` is None); a secret left empty
+        keeps the one already kept. Returns the account's id."""
+        found = self.accounts(kind)
+        old = next((a for a in found if a["id"] == account_id), None) if account_id else None
+        if account_id and old is None:
+            raise IntegrationError("没有这个账号")
+        old = old or {}
         secrets_, settings = dict(old.get("secrets") or {}), dict(old.get("settings") or {})
         if kind in ("github", "cloudflare"):
             if fields.get("token"):
@@ -173,26 +250,48 @@ class Integrations:
                 secrets_["key"] = key
                 settings["client_email"] = key["client_email"]
                 settings.setdefault("project", key.get("project_id"))
-                self._google_token = None
+                self._google_token.pop(old.get("id", ""), None)
             if fields.get("project"):
                 settings["project"] = str(fields["project"]).strip()
         if not secrets_:
             raise IntegrationError("还没有填凭据")
-        self._write(kind, {"secrets": secrets_, "settings": settings, "account": old.get("account"),
-                           "test": None, "saved_at": datetime.now(UTC).isoformat()})
+        label = str(fields.get("label") or old.get("label") or "").strip()[:40]
+        if not label:
+            taken = {a.get("label") for a in found}
+            label = next(n for n in (["默认"] + [f"账号 {i}" for i in range(2, 100)]) if n not in taken)
+        if any(a.get("label") == label and a["id"] != old.get("id") for a in found):
+            raise IntegrationError(f"已经有一个叫“{label}”的账号了")
+        ident = old.get("id") or _slug(label, {a["id"] for a in found})
+        self._write(kind, {"id": ident, "label": label, "secrets": secrets_, "settings": settings,
+                           "account": old.get("account"), "test": None, "saved_at": datetime.now(UTC).isoformat()})
+        return ident
 
-    def remove(self, kind: str) -> bool:
-        path = self._path(kind)
+    def remove(self, kind: str, account_id: str | None = None) -> bool:
+        found = self.accounts(kind)
+        if account_id is None and len(found) == 1:
+            account_id = found[0]["id"]
+        kept = [a for a in found if a["id"] != account_id]
+        if len(kept) == len(found):
+            return False
         if kind == "google":
-            shutil.rmtree(self.folder / "gcloud", ignore_errors=True)
-            self._google_token = None
-        if path.exists():
-            path.unlink()
-            return True
-        return False
+            shutil.rmtree(self.folder / f"gcloud-{account_id}", ignore_errors=True)
+            self._google_token.pop(account_id or "", None)
+        if kept:
+            self._store(kind, kept)
+        else:
+            self._path(kind).unlink(missing_ok=True)
+        return True
 
-    async def test(self, kind: str) -> dict[str, Any]:
-        """Try a tool with what is kept; remember who it connects as."""
+    async def test(self, kind: str, account_id: str | None = None) -> dict[str, Any]:
+        """Try an account with what is kept; remember who it connects as."""
+        ident = self._resolve(kind, account_id)
+        token = _SELECTED.set({**(_SELECTED.get() or {}), kind: ident})
+        try:
+            return await self._test_scoped(kind)
+        finally:
+            _SELECTED.reset(token)
+
+    async def _test_scoped(self, kind: str) -> dict[str, Any]:
         body = self.get(kind)
         if not body or not body.get("secrets"):
             raise IntegrationError("还没有连接")
@@ -239,6 +338,7 @@ class Integrations:
         return self._env({"GH_TOKEN": token, "GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1",
                           "GH_CONFIG_DIR": str(self.folder / "gh")})
 
+    @_scoped("github")
     async def github(self, args: str) -> str:
         argv = shlex.split(args)
         if argv and argv[0] == "gh":
@@ -271,6 +371,7 @@ class Integrations:
             env["AWS_SESSION_TOKEN"] = found["session_token"]
         return env
 
+    @_scoped("aws")
     async def aws(self, args: str) -> str:
         argv = shlex.split(args)
         if argv and argv[0] == "aws":
@@ -297,6 +398,7 @@ class Integrations:
             return {"Authorization": f"sso-key {found['key']}:{found['secret']}", "Accept": "application/json"}
         raise IntegrationError(f"{kind} 还没有连接")
 
+    @_scoped()
     async def api(self, kind: str, method: str, path: str, body: Any = None) -> str:
         """Call a connected HTTP API by its path (under its base address)."""
         if kind not in API_BASES:
@@ -343,6 +445,7 @@ class Integrations:
 
     # --- Slack ---
 
+    @_scoped("slack")
     async def slack(self, method: str, params: dict[str, Any] | None = None) -> str:
         if not re.fullmatch(r"[a-zA-Z]+(\.[a-zA-Z]+)+", method or ""):
             raise IntegrationError("method 要是 Slack Web API 的方法名，比如 chat.postMessage")
@@ -376,6 +479,7 @@ class Integrations:
         imap.login(settings["address"], password)
         return imap
 
+    @_scoped("email")
     async def email_search(self, query: str, folder: str = "INBOX", limit: int = 20) -> str:
         def work() -> str:
             imap = self._imap()
@@ -401,6 +505,7 @@ class Integrations:
 
         return await asyncio.to_thread(work)
 
+    @_scoped("email")
     async def email_read(self, uid: str, folder: str = "INBOX") -> str:
         def work() -> str:
             imap = self._imap()
@@ -417,6 +522,7 @@ class Integrations:
 
         return await asyncio.to_thread(work)
 
+    @_scoped("email")
     async def email_send(self, to: str, subject: str, body: str, cc: str = "") -> str:
         settings, password = self._email()
 
@@ -464,8 +570,10 @@ class Integrations:
 
     async def google_token(self) -> str:
         """An access token for the service account, signed with its key (by openssl, kept briefly)."""
-        if self._google_token and self._google_token[1] > time.time() + 60:
-            return self._google_token[0]
+        ident = (self.get("google") or {}).get("id", "")
+        kept = self._google_token.get(ident)
+        if kept and kept[1] > time.time() + 60:
+            return kept[0]
         key = self._google_key()
         now = int(time.time())
         segments = [_b64(json.dumps({"alg": "RS256", "typ": "JWT"}).encode()), _b64(json.dumps({
@@ -480,9 +588,10 @@ class Integrations:
         answer = response.json()
         if "access_token" not in answer:
             raise IntegrationError(f"Google 拒绝了：{answer.get('error_description') or answer.get('error')}")
-        self._google_token = (answer["access_token"], time.time() + int(answer.get("expires_in", 3600)))
+        self._google_token[ident] = (answer["access_token"], time.time() + int(answer.get("expires_in", 3600)))
         return answer["access_token"]
 
+    @_scoped("google")
     async def google_api(self, method: str, url: str, body: Any = None) -> str:
         if not re.match(r"^https://([a-z0-9-]+\.)*googleapis\.com/", url or ""):
             raise IntegrationError("url 要是 https://…googleapis.com/ 下的地址")
@@ -500,6 +609,7 @@ class Integrations:
             pass
         return _clip(f"[HTTP {response.status_code}]\n{text}")
 
+    @_scoped("google")
     async def gcloud(self, args: str) -> str:
         argv = shlex.split(args)
         if argv and argv[0] == "gcloud":
@@ -512,7 +622,7 @@ class Integrations:
 
     async def _gcloud_env(self) -> dict[str, str]:
         key = self._google_key()
-        config = self.folder / "gcloud"
+        config = self.folder / f"gcloud-{(self.get('google') or {}).get('id', 'default')}"
         env = self._env({"CLOUDSDK_CONFIG": str(config), "CLOUDSDK_CORE_DISABLE_PROMPTS": "1"})
         project = ((self.get("google") or {}).get("settings") or {}).get("project")
         if project:

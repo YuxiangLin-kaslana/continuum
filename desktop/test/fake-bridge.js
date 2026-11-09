@@ -54,7 +54,7 @@
       account: 'Logged in using ChatGPT' },
   ];
   const toolList = ['github', 'email', 'slack', 'google', 'cloudflare', 'godaddy', 'aws']
-    .map((kind) => ({ kind, connected: false, account: null, settings: {}, test: null }));
+    .map((kind) => ({ kind, connected: false, accounts: [], account: null, settings: {}, test: null }));
   let nextStep = 1;
   const step = (project, ticket, key, name, input, status, output = '') => {
     let row = steps.find((x) => x.ticket_id === ticket && x.key === key);
@@ -289,25 +289,38 @@
       h.profile = { ok: true, updated_at: now(), text: `${name} 是 ERP 的生产机。\n- 服务：nginx（443）、erp-api\n- 项目：/home/u/erp，分支 feature/mrp，在做 MRP` };
       resolve({ ok: true, data: { ...h } });
     }, 100)),
-    tools: () => ok({ admin: true, tools: toolList.map((t) => ({ ...t })) }),
+    tools: () => ok({ admin: true, tools: toolList.map((t) => ({ ...t, accounts: t.accounts.map((a) => ({ ...a })) })) }),
     toolSave: (kind, fields) => {
       const t = toolList.find((x) => x.kind === kind);
-      if (kind === 'github' && !fields.token && !t.connected) return Promise.resolve({ ok: false, status: 422, error: '还没有填凭据' });
-      Object.assign(t, { connected: true, account: kind === 'github' ? 'YuxiangLin-kaslana' : 'ok',
+      const { account_id: target, new: fresh, label, ...secrets } = fields;
+      let a = target ? t.accounts.find((x) => x.id === target) : null;
+      if (!a) {
+        if (!Object.keys(secrets).length) return Promise.resolve({ ok: false, status: 422, error: '还没有填凭据' });
+        const name = label || (t.accounts.length ? `账号 ${t.accounts.length + 1}` : '默认');
+        if (t.accounts.some((x) => x.label === name)) return Promise.resolve({ ok: false, status: 422, error: `已经有一个叫“${name}”的账号了` });
+        a = { id: name === '默认' ? 'default' : `a${t.accounts.length + 1}`, label: name, settings: {} };
+        t.accounts.push(a);
+      } else if (label) {
+        a.label = label;
+      }
+      Object.assign(a, { account: kind === 'github' ? `YuxiangLin-kaslana${t.accounts.length > 1 ? '-' + a.id : ''}` : kind === 'aws' ? 'arn:aws:iam::1234:user/continuum' : 'ok',
         test: { ok: true, message: '已连接', at: now() } });
+      t.connected = true;
       window.__fake.savedTools = { ...(window.__fake.savedTools || {}), [kind]: fields };
-      return ok({ ...t });
+      return ok({ ...t, accounts: t.accounts.map((x) => ({ ...x })), saved: a.id });
+    },
+    toolTest: (kind) => ok({ ...toolList.find((x) => x.kind === kind) }),
+    toolRemove: (kind, account) => {
+      const t = toolList.find((x) => x.kind === kind);
+      t.accounts = t.accounts.filter((a) => a.id !== account);
+      t.connected = t.accounts.length > 0;
+      return ok({ removed: true });
     },
     agents: () => ok(agentList.map((a) => ({ ...a }))),
     agentSwitch: (kind, enabled) => {
       const a = agentList.find((x) => x.kind === kind);
       a.enabled = enabled;
       return ok({ ...a });
-    },
-    toolTest: (kind) => ok({ ...toolList.find((x) => x.kind === kind) }),
-    toolRemove: (kind) => {
-      Object.assign(toolList.find((x) => x.kind === kind), { connected: false, account: null, test: null });
-      return ok({ removed: true });
     },
     sshDelete: (name) => {
       if (sshHosts.some((h) => h.jump === name)) return Promise.resolve({ ok: false, status: 409, error: `${sshHosts.filter((h) => h.jump === name).map((h) => h.name).join(', ')} 还经过它跳转，先改掉它们` });

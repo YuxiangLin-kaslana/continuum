@@ -401,6 +401,25 @@ def test_a_model_that_fails_leaves_the_ticket_waiting_for_the_person(tmp_path):
     asyncio.run(main())
 
 
+def test_an_answer_written_out_instead_of_reported_still_reaches_the_person(tmp_path):
+    router = ScriptedModel(call("decide", decision="accept", title="看 GitHub", scope="看", acknowledgement="好。",
+                                reason="r"))
+    worker = ScriptedModel({"role": "assistant", "content": "能访问。你的账号是 YuxiangLin-kaslana。"})
+
+    async def main():
+        rt = agent_runtime(tmp_path, router, worker)
+        try:
+            post(tmp_path, "你能看到我的 GitHub 吗")
+            await drive(rt, lambda: len(replies(tmp_path)) == 2, timeout=10)
+            [ticket] = rt.store.tickets.list()
+            assert ticket.ended is not None and ticket.ended.outcome == "completed"
+        finally:
+            await rt.close()
+
+    asyncio.run(main())
+    assert replies(tmp_path)[-1] == ("reply", "能访问。你的账号是 YuxiangLin-kaslana。")
+
+
 def test_a_transcript_cut_off_while_tools_ran_is_mended_before_it_goes_back_to_the_model():
     from continuum.plugins.agent_executor import _mend
 
