@@ -107,16 +107,15 @@ SSH_TOOLS = [
 ]
 SSH_RULES = """
 你还能用 ssh_hosts / ssh 在人登记过的服务器上执行命令（它们不在你的沙箱里，由 Continuum 代为连接）。
-【分工】你（DeepSeek）是调度者，按事情涉及的范围决定谁来执行：
-- 只涉及一台登记的服务器：用 remote_agent 交给那台服务器上的 Claude Code（优先）或 Codex 去做，你写清 task、检查它交回的结果、
-  再汇报。那台服务器两个都没有，才自己用 ssh 做。
-- 只涉及 Continuum 自己这台机器：交给本机的 claude_code / codex（有的话）。
-- 要在多台服务器之间协调（对比、迁移、联调、同时查好几台）：由你和 DeepSeek 子 Worker 用 ssh 来做；其中某一部分如果
-  只在一台服务器上，也可以交给那台的 remote_agent。
-- 复杂、耗资源的事（写或改较多代码、长时间的分析、大量计算或数据处理、构建、批量下载转换、模型推理）不在 Continuum
-  这台机器上做（{local}）：即使它不属于哪台服务器，也用 remote_agent 交给一台配置够、负载低、有编程助手的服务器去做
-  （优先开发机，避开在跑重要生产服务的机器；需要的文件用 scp/ssh 传过去，结果用 show_file 取回给人）。
-  简单的查询、一两条命令的事自己做就行。
+【在哪做、谁来做】你（DeepSeek）是调度者。动手前先按这个顺序判断，判断完再开始：
+1. 一两条命令就能看完的查询（看状态、看日志尾巴、测连通）：你自己用 ssh / shell 做。
+2. 在某一台登记的服务器上排查、修复、修改、开发：用 remote_agent 交给那台服务器上的 Claude Code（优先）或 Codex，
+   你写清 task、检查它交回的结果、再汇报。那台服务器两个都没有，才自己用 ssh 做。
+3. 不属于哪台服务器的复杂工作（写代码、搭项目或原型、写脚本抓取或处理数据、构建、批量转换、长时间分析）：
+   不要在 Continuum 这台机器上做（{local}，跑不动），用 remote_agent 交给工作机：{workers}。
+   在那台机器上用一个新目录（比如 ~/continuum-work/<短名>），做完把产物（文件、截图）用 show_file（写 host）取回给人。
+4. 要在多台服务器之间协调（对比、迁移、联调、同时查好几台）：由你和 DeepSeek 子 Worker 用 ssh 做；其中只在一台
+   服务器上的部分，也可以交给那台的 remote_agent。
 各服务器（编程助手；配置）：{agents}
 要查几台服务器、几个文件这类互不依赖的事，在同一步里一起发出多个工具调用，它们会同时执行（同一台服务器上的命令仍按顺序）。
 先用 ssh_hosts 看清单；去一台机器干活前用 ssh_profile 看它上面跑着什么、在开发什么。尽量用只读命令；会改东西的命令（重启、改文件、装包、删除）只在请求需要时用，reason 写清楚，
@@ -195,7 +194,8 @@ HOST_RULES = """
 gcloud、aws、gh、docker、git、systemctl 等，也能改 Continuum 自己的代码（{code}）和配置（{home}）。
 命令开始时的目录是本工单的工作目录 {workdir}；read_file / write_file / list_files 可以用绝对路径访问任何文件，
 相对路径相对于工作目录。产物仍放在工作目录里。
-人要你在这台机器上做的事就直接做，不要说做不到、也不要让人自己去跑命令。改系统、删东西、重启服务这类有影响的
+人要你在 Continuum 这台机器本身上做的事（改它的配置、装软件、重启服务）就直接做，不要说做不到、也不要让人自己去跑命令；
+但这台机器配置很低，复杂的、耗资源的工作按【在哪做、谁来做】交给工作机。改系统、删东西、重启服务这类有影响的
 操作，在汇报里说清做了什么、怎么撤回。重启 Continuum 自己（systemctl --user restart continuum）会打断你这一轮，
 要放在最后做，并先把要汇报的话准备好。
 """
@@ -371,7 +371,22 @@ def _ssh_rules(job: Any) -> str:
         out = "、".join(ssh_rules.AGENT_NAMES[k] for k in h.get("agents_out") or [])
         power = ssh_rules.describe_capacity(h.get("capacity"))
         lines.append(f"{h['name']}（{has}{f'，{out} 未登录' if out else ''}{f'；{power}' if power else ''}）")
-    return SSH_RULES.format(agents="；".join(lines) or "还不知道（remote_agent 会先查）", local=_local_capacity())
+    return SSH_RULES.format(agents="；".join(lines) or "还不知道（remote_agent 会先查）", local=_local_capacity(),
+                            workers=_workers(ssh.list()))
+
+
+def _workers(hosts: list[dict[str, Any]]) -> str:
+    """The servers best placed for heavy work: a coding agent signed in, room to spare, not production."""
+    def room(h: dict[str, Any]) -> float:
+        c = h.get("capacity") or {}
+        return c.get("free_gb", 0) + c.get("cpus", 0) - 10 * c.get("load", 0) / max(c.get("cpus", 1), 1)
+    able = [h for h in hosts if h.get("agents") and (h.get("state") or {}).get("ok") is not False]
+    calm = [h for h in able if "prod" not in h["name"].lower()] or able
+    best = sorted(calm, key=room, reverse=True)[:3]
+    if not best:
+        return "现在没有可用的（没有登录了编程助手的服务器），只能你自己用 ssh 在配置够的服务器上做"
+    named = [f"{h['name']}（{ssh_rules.AGENT_NAMES[h['agents'][0]]}）" for h in best]
+    return f"首选 {named[0]}" + (f"，其次 {'、'.join(named[1:])}" if len(named) > 1 else "")
 
 
 def _local_capacity() -> str:
@@ -548,7 +563,6 @@ class AgentExecutor:
                     *([REQUEST_TOOL] if job.integrations is not None and job.projects is not None else [])]
         if not messages:
             system = SYSTEM + (DELEGATING.format(names="、".join(delegates)) if delegates else "")
-            system += _ssh_rules(job)
             if job.projects:
                 tz = job.projects.timezone_of(getattr(job, "requester", "")) if hasattr(job.projects, "timezone_of") \
                     else "UTC"
@@ -557,6 +571,8 @@ class AgentExecutor:
                 system += PRESENT_RULES
             system += LEAD_RULES.format(most=MAX_DISPATCH) if job.crew else ""
             system += _host_rules(config, job)
+            # Last, where it is read with the most weight: where the work runs.
+            system += _ssh_rules(job)
             system += PERCEIVE_RULES
             if job.integrations is not None:
                 missing = [TOOL_KINDS[k] for k in TOOL_KINDS if k not in connected]
