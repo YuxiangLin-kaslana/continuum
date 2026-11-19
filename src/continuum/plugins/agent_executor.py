@@ -9,13 +9,16 @@ a restart, go on from it.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import re
+import shlex
 import time
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -25,6 +28,7 @@ from continuum.models import ChatModel, ModelError, partial_string, tool, tool_c
 from continuum.plugin import ExecutorContext
 
 from continuum.runtime import ssh as ssh_rules
+from continuum.runtime.files import MAX_FILE
 from continuum.runtime.projects import zone
 
 from . import cli_agents, sandbox
@@ -140,6 +144,26 @@ PROJECT_RULES = """
 提议后它还没生效，要等人在对话里确认；你就 report(state="ready")，summary 说清提议了什么、请他确认。
 """
 
+# Showing the person things: a file in their conversation, and the forms their app draws.
+SHOW_TOOL = tool(
+    "show_file",
+    "把一个文件直接发到人的对话里给他看：图片（png/jpg/gif/webp/svg）会直接显示，视频、音频可以播放，PDF、表格（csv）、"
+    "文本和代码文件可以预览，其他文件可以下载打开。可以是这台机器上的文件，也可以是某台服务器上的（写 host）。"
+    "一次发一个；caption 是一句说明（可以用 Markdown）。",
+    {"path": {"type": "string", "description": "文件路径；相对路径在工作目录下"},
+     "host": {"type": "string", "description": "文件在哪台服务器上（ssh_hosts 里的名字）；不写就是这台机器"},
+     "caption": {"type": "string"}}, required=["path"])
+PRESENT_RULES = """
+【给人看的形式】人的 App 能显示丰富的内容，汇报和消息里按内容选最合适的形式，但不要为了花哨而用：
+- 多项对比、清单数据用 Markdown 表格；代码和命令用带语言的代码块（```python）。
+- 流程、架构、时序、依赖关系用 ```mermaid 代码块（flowchart / sequenceDiagram / gantt 等）。
+- 数值的趋势、对比、占比用 ```chart 代码块，内容是 Chart.js 的配置 JSON（type 用 bar / line / pie / doughnut 等，
+  data 里写 labels 和 datasets）。只写 JSON，不要写函数。
+- 数学公式用 $...$（行内）或 $$...$$（单独一行）。
+- 你生成或找到的图片、截图、PDF、表格、音视频等文件，用 show_file 直接发给人（比如用 Python 画的图、网页截图、
+  服务器上的报告文件），不要只告诉他路径。
+"""
+
 # A project's lead sends parts of its job to sub-workers that run side by side; each finishes with its result.
 DISPATCH = tool(
     "dispatch",
@@ -249,6 +273,7 @@ ENDS_TURN = {"ready", "blocked", "failed", "dropped"}
 # The tools whose work a person sees as steps of the turn; the rest are the worker's calls to the host, whose words
 # reach the person as messages.
 SHOWN = {"shell", "read_file", "write_file", "list_files", "claude_code", "codex", "ssh", "remote_agent", "dispatch",
+         "show_file",
          *INTEGRATION_STEP}
 SHOWN_OUTPUT = 4000
 
@@ -293,7 +318,7 @@ def _basic(config: AgentConfig) -> list[dict[str, Any]]:
 
 
 # Calls that only look, or act on different servers, run side by side when a step asks for several at once.
-SIDE_BY_SIDE = {"ssh", "ssh_profile", "ssh_hosts", "read_file", "list_files", "remote_agent"}
+SIDE_BY_SIDE = {"ssh", "ssh_profile", "ssh_hosts", "read_file", "list_files", "remote_agent", "show_file"}
 
 
 def _side_by_side(calls: list[tuple[str, str, dict[str, Any]]]) -> bool:
@@ -492,7 +517,8 @@ class AgentExecutor:
             # Asked again at every step: a tool the person connects during the turn can be used at once.
             now_connected = [k for k in INTEGRATION_TOOLS if job.integrations and k in job.integrations.connected()]
             return [*_basic(config), *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
-                    *(PROJECT_TOOLS if job.projects else []), *([DISPATCH] if job.crew else []),
+                    *(PROJECT_TOOLS if job.projects else []), *([SHOW_TOOL] if job.projects else []),
+                    *([DISPATCH] if job.crew else []),
                     *(t for kind in now_connected for t in INTEGRATION_TOOLS[kind]),
                     *([REQUEST_TOOL] if job.integrations is not None and job.projects is not None else [])]
         if not messages:
@@ -503,6 +529,7 @@ class AgentExecutor:
                     else "UTC"
                 local = datetime.now(UTC).astimezone(zone(tz))
                 system += PROJECT_RULES.format(tz=tz, now=local.strftime("%Y-%m-%d %H:%M %A"))
+                system += PRESENT_RULES
             system += LEAD_RULES.format(most=MAX_DISPATCH) if job.crew else ""
             system += _host_rules(config, job)
             if job.integrations is not None:
@@ -590,6 +617,8 @@ class AgentExecutor:
             return await self._ssh(job, key, args), False
         if name == "remote_agent":
             return await self._remote_agent(job, config, key, args), False
+        if name == "show_file":
+            return await self._show_file(job, config, key, args), False
         if name == "dispatch":
             return await self._dispatch(job, config, key, args), False
         if name in INTEGRATION_STEP:
@@ -754,6 +783,67 @@ class AgentExecutor:
             return f"（用完了 {config.max_steps} 步，没做完）{words}"
         except ModelError as error:
             return f"模型调用失败：{error}"
+
+    async def _show_file(self, job, config: AgentConfig, key: str, args: dict[str, Any]) -> str:
+        """A file put in the person's conversation: from here, or fetched from one of their servers."""
+        desk = getattr(job, "projects", None)
+        if desk is None or not hasattr(desk, "attach"):
+            return "错误：这里不能给人发文件"
+        if "_invalid" in args:
+            return f"错误：参数不是合法的 JSON：{args['_invalid'][:200]}"
+        path, where = str(args.get("path", "")).strip(), str(args.get("host") or "").strip()
+        if not path:
+            return "错误：path 是空的"
+        step = {"type": "step", "key": key, "name": "show_file", "input": f"{where}  $ {path}" if where else path}
+        job.activity({**step, "status": "running", "output": ""})
+        try:
+            if where:
+                data = await self._fetch_remote(job, key, where, path, step)
+            else:
+                target = _inside(job.workdir, path, config.sandbox.kind == "host")
+                if not target.is_file():
+                    raise ValueError(f"没有这个文件：{path}")
+                if target.stat().st_size > MAX_FILE:
+                    raise ValueError(f"文件太大（{target.stat().st_size // 1024 // 1024} MB），最多 {MAX_FILE // 1024 // 1024} MB")
+                data = target.read_bytes()
+            name = PurePosixPath(path).name
+            meta = await asyncio.to_thread(desk.attach, job, name, data, str(args.get("caption") or "").strip())
+        except (ValueError, OSError) as error:
+            job.activity({**step, "status": "error", "output": str(error)})
+            return f"错误：{error}"
+        size = f"{meta['size'] / 1024:.0f} KB" if meta["size"] < 1024 * 1024 else f"{meta['size'] / 1024 / 1024:.1f} MB"
+        job.activity({**step, "status": "done", "output": f"{meta['name']}（{meta['mime']}，{size}）"})
+        return f"已发到人的对话里：{meta['name']}（{meta['mime']}，{size}）"
+
+    async def _fetch_remote(self, job, key: str, host_name: str, path: str, step: dict[str, Any]) -> bytes:
+        """A file's bytes from one of the person's servers, read with one command (asked for when the server says)."""
+        ssh = getattr(job, "ssh", None)
+        if ssh is None:
+            raise ValueError("你不能使用 SSH 服务器")
+        host = ssh.get(host_name)
+        if host is None:
+            raise ValueError(f"没有叫 {host_name} 的服务器")
+        if host.get("approval", "ask") == "ask":
+            job.activity({**step, "status": "approval", "output": "把这个文件取回来给你看"})
+            if await ssh.approvals.wait(job.ticket_id, key, APPROVAL_TIMEOUT) != "approved":
+                raise ValueError("没有取：人没有批准")
+            job.activity({**step, "status": "running", "output": ""})
+        quoted = shlex.quote(path if not path.startswith("~/") else path[2:])
+        target = quoted if not path.startswith("~/") else f'"$HOME"/{quoted}'
+        command = (f"f={target}; [ -f \"$f\" ] || {{ echo missing; exit 3; }}; s=$(stat -c %s \"$f\"); "
+                   f"[ \"$s\" -le {MAX_FILE} ] || {{ echo too-big:$s; exit 4; }}; echo; base64 -w0 \"$f\" 2>/dev/null")
+        code, output = await ssh.run(host_name, command, timeout=120)
+        last = output.strip().splitlines()[-1] if output.strip() else ""
+        if code == 3:
+            raise ValueError(f"{host_name} 上没有这个文件：{path}")
+        if code == 4:
+            raise ValueError(f"文件太大，最多 {MAX_FILE // 1024 // 1024} MB")
+        if code != 0:
+            raise ValueError(f"没取到（{output.strip()[-200:] or code}）")
+        try:
+            return base64.b64decode(last, validate=True)
+        except (binascii.Error, ValueError):
+            raise ValueError("取回的内容不完整") from None
 
     async def _remote_agent(self, job, config: AgentConfig, key: str, args: dict[str, Any]) -> str:
         """A job on one server, handed to the coding agent there: after the person's approval if the server needs it."""

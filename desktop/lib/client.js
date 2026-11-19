@@ -54,6 +54,20 @@ class Client {
     return data;
   }
 
+  // A file the assistant showed: its bytes and kind.
+  async download(route) {
+    if (!this.server || !this.token) throw new ApiError(0, '还没有连接到服务器');
+    let response;
+    try {
+      response = await this.fetch(`${this.server}${route}`, { headers: { Authorization: `Bearer ${this.token}` } });
+    } catch (error) {
+      throw new ApiError(0, `连不上服务器：${error.message}`);
+    }
+    if (!response.ok) throw new ApiError(response.status, response.status === 404 ? '文件不在了' : `下载失败（${response.status}）`);
+    return { mime: response.headers.get('content-type') || 'application/octet-stream',
+      data: Buffer.from(await response.arrayBuffer()) };
+  }
+
   // Check an address and token before saving them.
   static async verify(fetch, server, token) {
     const client = new Client({ fetch, onEvent() {}, onState() {} });

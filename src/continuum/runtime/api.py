@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from continuum.core.errors import UserError
@@ -252,6 +253,16 @@ def create_app(rt: Runtime) -> FastAPI:
         kind, ctx = source()
         _, by_ticket = project_index(user)
         return [tag(m, by_ticket) for m in kind.search(ctx, user, q.strip() or q)]
+
+    @app.get("/api/v1/files/{ident}")
+    async def file(ident: str, user: str = Depends(user_of)) -> FileResponse:
+        found = rt.files.get(ident)
+        # Someone else's file is as missing as one that never was.
+        if found is None or found[1].get("owner") != user or not found[0].exists():
+            raise HTTPException(404, "没有这个文件")
+        path, meta = found
+        return FileResponse(path, media_type=meta["mime"], filename=meta["name"], content_disposition_type="inline",
+                            headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
     @app.get("/api/v1/steps")
     async def all_steps(user: str = Depends(user_of)) -> list[dict[str, Any]]:

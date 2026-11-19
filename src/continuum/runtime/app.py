@@ -30,6 +30,7 @@ from continuum.policy.gate import RulePolicy
 
 from .accounts import Accounts
 from .crew import Crew
+from .files import Files
 from .integrations import NAMES, Integrations
 from .projects import Projects, project_of_thread, zone
 from .ssh import SshHosts, survey
@@ -122,6 +123,7 @@ class Runtime:
             self.executor.context.crew = self.crew
             self.integrations = Integrations(self.home)
             self.executor.context.integrations = self.integrations
+            self.files = Files(self.home / "data" / "files")
             self.router.projects = self.executor.context.projects
             self.router.bind(self.engine)
             self.executor.bind(self.engine)
@@ -502,6 +504,16 @@ class ProjectDesk:
         return self.rt.timezone_of(user)
 
     # --- for a worker: asking the person to connect a tool ---
+
+    def attach(self, job: Any, name: str, data: bytes, caption: str) -> dict[str, Any]:
+        """A file the worker shows the person: kept on the server and put in their conversation."""
+        owner = getattr(job, "requester", None)
+        ctx = self.rt.app_source()
+        if not owner or ctx is None:
+            raise ValueError("只有通过对话提的请求才能给人发文件")
+        meta = self.rt.files.keep(owner, name, data)
+        ctx.kind.say(ctx, owner, "main", "attachment", caption, {"files": [Files.shown(meta)]}, ticket_id=job.ticket_id)
+        return meta
 
     def ask_for_tool(self, job: Any, kind: str, reason: str) -> None:
         """A card in the person's conversation where they give a tool's credentials, straight to the server."""

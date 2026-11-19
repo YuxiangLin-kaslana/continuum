@@ -130,6 +130,12 @@
     const kept = [];
     const keep = (html) => `\u0000${kept.push(html) - 1}\u0000`;
     let out = text.replace(/`([^`]+)`/g, (_, code) => keep(`<code>${escape(code)}</code>`));
+    // Formulas: $…$ (not a price: no space just inside, no digit right after) and \(…\).
+    out = out.replace(/\\\((.+?)\\\)/g, (_, tex) => keep(`<span class="math" data-tex="${escape(tex)}"></span>`));
+    out = out.replace(/(^|[^\\$\w])\$([^\s$](?:[^$\n]*?[^\s$\\])?)\$(?![\w$])/g,
+      (_, before, tex) => before + keep(`<span class="math" data-tex="${escape(tex)}"></span>`));
+    out = out.replace(/!\[([^\]\n]*)\]\((https:\/\/[^\s)]+|data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=]+)\)/g,
+      (_, alt, url) => keep(`<img class="md-img" alt="${escape(alt)}" src="${escape(url)}">`));
     out = out.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
       (_, label, url) => keep(`<a href="${escape(url)}" target="_blank" rel="noopener">${escape(label)}</a>`));
     out = out.replace(/https?:\/\/[^\s<>()"'`]+[^\s<>()"'`.,;:!?，。；：！？）]/g,
@@ -143,6 +149,7 @@
   const RULE = /^\s*\|[\s:|-]+\|\s*$/;
   const ITEM = /^\s*([-*•+]|\d+[.)])\s+/;
   const FENCE = /^\s*(```|~~~)/;
+  const MATH_BLOCK = /^\s*\$\$/;
   const HEADING = /^\s*#{1,6}\s+/;
   const QUOTE = /^\s*>\s?/;
   const HR = /^\s*([-*_])(\s*\1){2,}\s*$/;
@@ -151,17 +158,30 @@
     const out = [];
     let rich = false;
     let i = 0;
-    const special = (at) => FENCE.test(lines[at]) || HEADING.test(lines[at]) || ITEM.test(lines[at])
+    const special = (at) => FENCE.test(lines[at]) || MATH_BLOCK.test(lines[at]) || HEADING.test(lines[at]) || ITEM.test(lines[at])
       || QUOTE.test(lines[at]) || HR.test(lines[at]) || (ROW.test(lines[at]) && RULE.test(lines[at + 1] || ''));
     while (i < lines.length) {
       const line = lines[i];
       if (FENCE.test(line)) {
         const fence = line.trim().slice(0, 3);
+        const lang = line.trim().slice(3).trim().split(/\s/)[0].toLowerCase();
         const code = [];
         i++;
         while (i < lines.length && !lines[i].trim().startsWith(fence)) code.push(lines[i++]);
         i++;
-        out.push(`<pre><code>${escape(code.join('\n'))}</code></pre>`);
+        const src = escape(code.join('\n'));
+        // A diagram, a chart or a formula is drawn; other code is highlighted in its language.
+        if (lang === 'mermaid') out.push(`<div class="diagram" data-src="${src}"></div>`);
+        else if (lang === 'chart') out.push(`<div class="chart" data-src="${src}"></div>`);
+        else if (['math', 'latex', 'tex', 'katex'].includes(lang)) out.push(`<div class="math block" data-tex="${src}"></div>`);
+        else out.push(`<pre><code data-lang="${escape(lang)}">${src}</code></pre>`);
+        rich = true;
+      } else if (MATH_BLOCK.test(line)) {
+        const tex = [line.trim().slice(2)];
+        i++;
+        while (!tex[tex.length - 1].trimEnd().endsWith('$$') && i < lines.length) tex.push(lines[i++]);
+        const joined = tex.join('\n').trim().replace(/\$\$\s*$/, '');
+        out.push(`<div class="math block" data-tex="${escape(joined)}"></div>`);
         rich = true;
       } else if (ROW.test(line) && RULE.test(lines[i + 1] || '')) {
         const cells = (row) => row.trim().replace(/^\||\|$/g, '').split('|').map((c) => inline(c.trim()));
@@ -459,9 +479,22 @@
     return item;
   }
 
+  // An answer with something drawn in it (a chart, a diagram, a picture) is drawn once: a redraw of the conversation
+  // keeps the same node.
+  const drawn = new Map();
   function message(m) {
     if (m.role === 'proposal') return proposal(m);
     if (m.role === 'credential') return credential(m);
+    if (m.role !== 'reply' && m.role !== 'attachment') return plainMessage(m);
+    const key = `${m.id}|${m.text}|${JSON.stringify(m.meta || {})}|${timelineBox()?.box === $('messages')}`;
+    const kept = drawn.get(m.id);
+    if (kept && kept.key === key) return arrival(kept.node, `m:${m.id}`);
+    const node = plainMessage(m);
+    drawn.set(m.id, { key, node });
+    return node;
+  }
+
+  function plainMessage(m) {
     const item = el('li', `msg ${m.role}`);
     item.dataset.id = m.id;
     const mine = m.role === 'user';
@@ -471,6 +504,17 @@
       const { html, rich } = markdown(m.text);
       bubble.innerHTML = html;
       if (rich) item.classList.add('rich');
+      Rich.enhance(bubble);
+    } else if (m.role === 'attachment') {
+      // A file the assistant shows: a line about it, then the file itself.
+      item.classList.add('rich');
+      if (m.text) {
+        const caption = el('div', 'caption');
+        caption.innerHTML = markdown(m.text).html;
+        bubble.append(caption);
+        Rich.enhance(caption);
+      }
+      for (const file of (m.meta && m.meta.files) || []) bubble.append(Rich.fileCard(file, call, showStatus));
     } else if (m.role === 'reminder') {
       bubble.append(icon('bell'), el('span', '', m.text));
     } else if (m.role === 'scheduled') {

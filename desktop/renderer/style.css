@@ -527,3 +527,46 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 .tool-icon svg { width: 58%; height: 58%; }
 .tool-icon svg.brand { fill: currentColor; }
 .tool-icon svg.plain { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* --- what an answer can show beyond words --- */
+.msg.attachment .bubble { grid-column: 2; justify-self: stretch; padding: 4px 0 0; background: none; border: 0; white-space: normal; }
+.msg.attachment .caption { margin-bottom: 8px; }
+.bubble .hljs-keyword, .bubble .hljs-selector-tag, .bubble .hljs-built_in, .bubble .hljs-type { color: #c792ea; }
+.bubble .hljs-string, .bubble .hljs-attr-value, .bubble .hljs-regexp, .bubble .hljs-addition { color: #a5d6a7; }
+.bubble .hljs-number, .bubble .hljs-literal, .bubble .hljs-symbol { color: #f2a33a; }
+.bubble .hljs-comment, .bubble .hljs-quote { color: #61707a; font-style: italic; }
+.bubble .hljs-title, .bubble .hljs-section, .bubble .hljs-function .hljs-title { color: #5fd3d1; }
+.bubble .hljs-attr, .bubble .hljs-attribute, .bubble .hljs-variable, .bubble .hljs-template-variable, .bubble .hljs-property { color: #8fb8ff; }
+.bubble .hljs-meta, .bubble .hljs-doctag, .bubble .hljs-tag { color: #7d8b88; }
+.bubble .hljs-deletion { color: #e5677d; }
+.bubble .math { color: var(--ink); }
+.bubble .math.block { display: block; margin: 8px 0; overflow-x: auto; text-align: center; font-size: 1.08em; }
+.bubble math { font-family: "Cambria Math", "STIX Two Math", "Latin Modern Math", serif; }
+.bubble .diagram { margin: 8px 0; padding: 10px; background: #070a0c; border: 1px solid var(--line); text-align: center; min-height: 40px; }
+.bubble .diagram:not(:has(img)):not(.failed)::before, .bubble .chart:not(:has(canvas)):not(.failed)::before { content: "绘制中…"; color: var(--dim, #7d8b88); font-size: 12px; }
+.bubble .diagram-img { max-width: 100%; height: auto; cursor: zoom-in; }
+.bubble .chart { margin: 8px 0; padding: 10px; background: #070a0c; border: 1px solid var(--line); }
+.bubble .chart-frame { position: relative; height: 260px; width: 100%; }
+.bubble .failed { text-align: left; }
+.bubble .rich-error { color: #e5677d; font-size: 12px; margin-bottom: 4px; }
+.bubble img.md-img { max-width: 100%; max-height: 420px; display: block; margin: 6px 0; cursor: zoom-in; border: 1px solid var(--line); }
+.file-card { border: 1px solid var(--line-2); background: var(--panel); margin: 6px 0; max-width: 100%; }
+.file-card .file-head { display: flex; align-items: center; gap: 10px; padding: 8px 10px; min-width: 0; }
+.file-card .file-badge { flex: none; font: 700 10px/1 var(--sans); letter-spacing: 0.06em; color: var(--teal); border: 1px solid var(--teal-line); padding: 5px 6px; }
+.file-card .file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13px; }
+.file-card .file-size { flex: none; color: #7d8b88; font-size: 11.5px; }
+.file-card .file-actions { flex: none; display: flex; gap: 6px; }
+.file-card .file-body:empty { display: none; }
+.file-card .file-body { border-top: 1px solid var(--line); }
+.file-card .file-image { display: block; max-width: 100%; max-height: 480px; margin: 0 auto; cursor: zoom-in; background: #070a0c; }
+.file-card .file-media { display: block; width: 100%; max-height: 420px; background: #000; }
+.file-card .file-audio { display: block; width: 100%; padding: 8px; box-sizing: border-box; }
+.file-card .file-table { max-height: 360px; overflow: auto; }
+.file-card .file-table table { margin: 0; }
+.file-card pre { margin: 0; border: 0; max-height: 360px; overflow: auto; }
+.file-card .file-more, .file-card .file-loading { color: #7d8b88; font-size: 11.5px; padding: 6px 10px; }
+.lightbox { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.88); display: flex; align-items: center; justify-content: center; cursor: zoom-out; padding: 24px; }
+.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; background: #0b0d0c; }
+/* Letters in a formula as plain italics: the math-italic code points need a math font a computer may not have. */
+.bubble math mi { text-transform: none; font-style: italic; }
+.bubble math mi[mathvariant="normal"] { font-style: normal; }

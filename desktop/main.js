@@ -1,8 +1,9 @@
 // Continuum desktop: a small always-at-hand window, a tray icon and a global shortcut. The window talks to the
 // Continuum server through this process (lib/client.js); the renderer only sees what preload.js exposes.
+const fs = require('fs');
 const path = require('path');
-const { app, BrowserWindow, Tray, Menu, Notification, globalShortcut, ipcMain, nativeImage, net, safeStorage } =
-  require('electron');
+const { app, BrowserWindow, Tray, Menu, Notification, dialog, globalShortcut, ipcMain, nativeImage, net, safeStorage,
+  shell } = require('electron');
 const { Client } = require('./lib/client');
 const configStore = require('./lib/config');
 
@@ -204,6 +205,30 @@ handle('api:sshSave', (name, host) =>
   client.request('PUT', `/api/v1/ssh/hosts/${encodeURIComponent(name)}`, host));
 handle('api:sshDelete', (name) => client.request('DELETE', `/api/v1/ssh/hosts/${encodeURIComponent(name)}`));
 handle('api:sshTest', (name) => client.request('POST', `/api/v1/ssh/hosts/${encodeURIComponent(name)}/test`));
+// Files the assistant showed: shown in the window, opened with the system's own app, or saved where the person says.
+const fileRoute = (id) => `/api/v1/files/${encodeURIComponent(id)}`;
+const fileName = (name) => path.basename(String(name || 'file')).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') || 'file';
+handle('api:file', async (id) => {
+  const { mime, data } = await client.download(fileRoute(id));
+  return { mime, data: data.toString('base64') };
+});
+handle('file:open', async (id, name) => {
+  const { data } = await client.download(fileRoute(id));
+  const folder = path.join(app.getPath('temp'), 'continuum-files', String(id).replace(/[^0-9a-f]/g, ''));
+  fs.mkdirSync(folder, { recursive: true });
+  const target = path.join(folder, fileName(name));
+  fs.writeFileSync(target, data);
+  const problem = await shell.openPath(target);
+  if (problem) throw new Error(problem);
+  return true;
+});
+handle('file:save', async (id, name) => {
+  const chosen = await dialog.showSaveDialog(win, { defaultPath: fileName(name) });
+  if (chosen.canceled || !chosen.filePath) return null;
+  const { data } = await client.download(fileRoute(id));
+  fs.writeFileSync(chosen.filePath, data);
+  return chosen.filePath;
+});
 handle('api:sshProfile', (name) => client.request('POST', `/api/v1/ssh/hosts/${encodeURIComponent(name)}/profile`));
 handle('api:stop', (id) => client.request('POST', `/api/v1/tickets/${encodeURIComponent(id)}/stop`, {}));
 handle('api:retry', (id) => client.request('POST', `/api/v1/tickets/${encodeURIComponent(id)}/retry`));

@@ -37,3 +37,14 @@ text is in that directory.
 The brand marks on the desktop app's tools page (`desktop/renderer/brands.js`) come from Simple Icons 13.21.0,
 https://simpleicons.org, released under CC0 1.0 Universal. The marks themselves are trademarks of their owners and
 are used only to name their services.
+
+## Libraries that draw answers
+
+`desktop/renderer/vendor/` bundles, unmodified, the browser builds of:
+
+- highlight.js 11.11.1 (BSD 3-Clause), code highlighting;
+- KaTeX 0.16.22 (MIT), formulas, rendered to MathML;
+- Mermaid 11.4.1 (MIT), diagrams;
+- Chart.js 4.4.7 (MIT), charts.
+
+Their license texts are in `desktop/renderer/vendor/licenses/`.

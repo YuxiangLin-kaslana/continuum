@@ -628,3 +628,99 @@ def test_a_worker_asks_for_a_tool_and_the_person_connects_it_on_the_card():
         assert page.evaluate("window.__fake.savedTools.aws.access_key_id") == "AKIAEXAMPLEKEY"
         assert errors == []
         browser.close()
+
+
+RICH_ANSWER = """这是本周的情况。
+
+```python
+def total(rows):
+    return sum(r["qty"] for r in rows)
+```
+
+```mermaid
+flowchart LR
+  A[CRM] --> B[Omanus] --> C[模型]
+```
+
+```chart
+{"type": "bar", "data": {"labels": ["周一", "周二", "周三"], "datasets": [{"label": "耗时（秒）", "data": [12, 7, 4]}]}}
+```
+
+单价 $5 和 $10 不是公式；能量 $E = mc^2$ 是。
+
+$$
+\\int_0^1 x^2\\,dx = \\frac{1}{3}
+$$
+"""
+
+
+@pytest.mark.skipif(_browser() is None, reason="needs playwright")
+def test_answers_draw_code_formulas_diagrams_charts_and_the_files_the_assistant_shows():
+    import base64
+
+    png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    csv = base64.b64encode("零件,数量\nR12,40\nC3,\"1,200\"\n".encode()).decode()
+    sync_playwright = _browser()
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        # The page's own Content-Security-Policy stays on: everything must draw within it.
+        page = browser.new_context(viewport={"width": 520, "height": 780}).new_page()
+        errors, refused = [], []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("console", lambda m: refused.append(f"{m.text[:120]} @ {m.location}") if "Content Security Policy" in m.text else None)
+        page.add_init_script(path=str(DESKTOP / "test" / "fake-bridge.js"))
+        page.goto((DESKTOP / "renderer" / "index.html").as_uri())
+        page.wait_for_selector("#app[data-ready]")
+        page.fill("#username", "me")
+        page.fill("#password", "good-password")
+        page.click("#connect")
+        page.wait_for_selector("#main:not([hidden])")
+        page.evaluate("""([png, csv]) => {
+            window.__fake.files.f1 = { mime: 'image/png', data: png };
+            window.__fake.files.f2 = { mime: 'text/csv', data: csv };
+        }""", [png, csv])
+        page.evaluate("t => window.__fake.say('t-4', 'reply', t, 't-4')", RICH_ANSWER)
+        page.evaluate("""() => window.__fake.say('t-4', 'attachment', '**本周**的走势图', 't-4', { files: [
+            { id: 'f1', name: 'plot.png', mime: 'image/png', size: 68 },
+            { id: 'f2', name: 'week.csv', mime: 'text/csv', size: 40 },
+            { id: 'f3', name: 'report.pdf', mime: 'application/pdf', size: 204800 }] })""")
+        answer = page.locator(".msg.reply", has_text="这是本周的情况")
+        # Code in its language; a diagram and a chart drawn; formulas, but not prices.
+        answer.locator("pre code.hljs .hljs-keyword").first.wait_for()
+        answer.locator(".diagram img.diagram-img").wait_for(timeout=15000)
+        answer.locator(".chart canvas").wait_for(timeout=15000)
+        answer.locator(".math.drawn math").first.wait_for(timeout=15000)
+        assert answer.locator(".math").count() == 2 and answer.locator(".math.block").count() == 1
+        assert "$5 和 $10" in answer.inner_text()
+        assert page.evaluate("document.querySelector('.diagram-img').naturalWidth") > 50
+        # The files: the picture shown, the table previewed, the PDF to open.
+        files = page.locator(".msg.attachment").last
+        assert files.locator(".caption strong").inner_text() == "本周"
+        files.locator(".file-card[data-file=f1] img.file-image").wait_for()
+        assert page.evaluate("document.querySelector('.file-image').naturalWidth") == 1
+        files.locator(".file-card[data-file=f2] table").wait_for()
+        assert files.locator(".file-card[data-file=f2] td").all_inner_texts() == ["R12", "40", "C3", "1,200"]
+        assert files.locator(".file-card[data-file=f3]").get_attribute("class").split() == ["file-card", "plain"]
+        files.locator(".file-card[data-file=f3] >> text=打开").click()
+        files.locator(".file-card[data-file=f3] >> text=另存为").click()
+        page.wait_for_function("window.__fake.opened.length === 2")
+        assert page.evaluate("window.__fake.opened") == [["open", "f3", "report.pdf"], ["save", "f3", "report.pdf"]]
+        # A picture opens large, and closes again.
+        files.locator("img.file-image").click()
+        page.wait_for_selector(".lightbox img")
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".lightbox", state="detached")
+        # A redraw keeps what was drawn.
+        drawn = page.evaluate("document.querySelector('.chart canvas') !== null && "
+                              "(window.__keep = document.querySelector('.chart canvas'), true)")
+        page.evaluate("window.__fake.say('t-4', 'reply', '好的', 't-4')")
+        page.wait_for_selector(".msg.reply >> text=好的")
+        assert drawn and page.evaluate("document.querySelector('.chart canvas') === window.__keep")
+        if SHOTS:
+            answer.screenshot(path=f"{SHOTS}/desktop-rich-answer.png")
+            files.screenshot(path=f"{SHOTS}/desktop-rich-files.png")
+        browser.close()
+    assert not errors, errors
+    # Mermaid sets styles on its scratch drawing while it measures; the picture it makes holds its own.
+    refused = [r for r in refused if "mermaid.min.js" not in r]
+    assert not refused, "\n".join(sorted(set(refused)))

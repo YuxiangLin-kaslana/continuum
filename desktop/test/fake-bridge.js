@@ -108,9 +108,13 @@
   // counted, and a held pause goes on once there are as many as pauses so far: no order of the two loses one.
   let passes = 0;
   let pauses = 0;
-  window.__fake = { fire, messages, projects, steps, hold: false,
+  // Files the assistant showed, by id: their kind and bytes (base64).
+  const files = {};
+  window.__fake = { fire, messages, projects, steps, hold: false, files, opened: [],
     release: () => { passes++; },
-    gates: () => ({ passes, pauses }) };
+    gates: () => ({ passes, pauses }),
+    // Something the assistant says now, as the server would send it.
+    say: (project, role, text, ticket, meta) => fire('event', { type: 'message', message: add(project, role, text, ticket, meta) }) };
   window.continuum = {
     getConfig: () => ok({ server: 'https://continuum.example.com', user: configured ? 'me' : '', configured,
       connection: configured ? 'online' : 'offline' }),
@@ -284,6 +288,9 @@
       sshHosts.sort((a, b) => a.name.localeCompare(b.name));
       return ok({ ...row });
     },
+    file: (id) => (files[id] ? ok({ ...files[id] }) : Promise.resolve({ ok: false, status: 404, error: '文件不在了' })),
+    openFile: (id, name) => { window.__fake.opened.push(['open', id, name]); return ok(true); },
+    saveFile: (id, name) => { window.__fake.opened.push(['save', id, name]); return ok(`C:/Users/me/${name}`); },
     sshProfile: (name) => new Promise((resolve) => setTimeout(() => {
       const h = sshHosts.find((x) => x.name === name);
       h.profile = { ok: true, updated_at: now(), text: `${name} 是 ERP 的生产机。\n- 服务：nginx（443）、erp-api\n- 项目：/home/u/erp，分支 feature/mrp，在做 MRP` };
