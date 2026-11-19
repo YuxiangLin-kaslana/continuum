@@ -110,7 +110,7 @@
   let pauses = 0;
   // Files the assistant showed, by id: their kind and bytes (base64).
   const files = {};
-  window.__fake = { fire, messages, projects, steps, hold: false, files, opened: [],
+  window.__fake = { fire, messages, projects, steps, hold: false, files, opened: [], uploadedNames: {},
     release: () => { passes++; },
     gates: () => ({ passes, pauses }),
     // Something the assistant says now, as the server would send it.
@@ -150,9 +150,22 @@
       }
       return ok({ ...p });
     },
-    post: (thread, text) => {
+    upload: (name, bytes) => {
+      const id = `up${Object.keys(files).length + 1}`;
+      const mime = /\.png$/i.test(name) ? 'image/png' : /\.mp3$/i.test(name) ? 'audio/mpeg' : 'application/octet-stream';
+      let binary = '';
+      for (const b of bytes) binary += String.fromCharCode(b);
+      files[id] = { mime, data: btoa(binary) };
+      window.__fake.uploadedNames[id] = name;
+      return ok({ id, name, mime, size: bytes.length });
+    },
+    post: (thread, text, sent) => {
       const project = thread.startsWith('p-') ? thread.slice(2) : null;
-      const row = add(project, 'user', text, null, project ? { project, project_name: (projects.find((p) => p.id === project) || {}).name } : null, thread);
+      const attached = (sent || []).map((id) => ({ id, name: window.__fake.uploadedNames[id] || id, mime: files[id].mime,
+        size: atob(files[id].data).length }));
+      window.__fake.lastPost = { thread, text, files: sent || [] };
+      const meta = project ? { project, project_name: (projects.find((p) => p.id === project) || {}).name } : null;
+      const row = add(project, 'user', text, null, attached.length ? { ...(meta || {}), files: attached } : meta, thread);
       // A turn as the server streams it: acknowledged, thinking, a command run, the answer written as it comes.
       const ticket = project ? `r-${row.id}` : `t-${row.id}`;
       const owner = project || ticket;

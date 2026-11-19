@@ -54,6 +54,26 @@ class Client {
     return data;
   }
 
+  // A file the person sends: its bytes as the body; what the server keeps of it comes back.
+  async upload(route, data) {
+    if (!this.server || !this.token) throw new ApiError(0, '还没有连接到服务器');
+    let response;
+    try {
+      response = await this.fetch(`${this.server}${route}`, { method: 'POST', body: data,
+        headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/octet-stream' } });
+    } catch (error) {
+      throw new ApiError(0, `连不上服务器：${error.message}`);
+    }
+    const text = await response.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch (_) { body = null; }
+    if (!response.ok) {
+      const detail = body && body.detail;
+      throw new ApiError(response.status, typeof detail === 'string' ? detail : `上传失败（${response.status}）`);
+    }
+    return body;
+  }
+
   // A file the assistant showed: its bytes and kind.
   async download(route) {
     if (!this.server || !this.token) throw new ApiError(0, '还没有连接到服务器');

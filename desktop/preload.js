@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('continuum', {
   sshTest: call('api:sshTest'),
   sshProfile: call('api:sshProfile'),
   file: call('api:file'),
+  upload: call('api:upload'),
   openFile: call('file:open'),
   saveFile: call('file:save'),
   stop: call('api:stop'),

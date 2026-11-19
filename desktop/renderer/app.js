@@ -522,12 +522,22 @@
     } else {
       bubble.textContent = m.text;
     }
+    // Files the person sent with their words.
+    const sent = mine && m.meta && m.meta.files;
+    if (sent && sent.length) {
+      item.classList.add('with-files');
+      const box = el('div', 'sent-files');
+      for (const file of sent) box.append(Rich.fileCard(file, call, showStatus));
+      if (!m.text) bubble.hidden = true;
+      item.append(face, bubble, box);
+    }
     const meta = el('div', 'meta', time(m.at));
     // A message the dispatcher handed to a project already under way says which.
     if (mine && m.meta && m.meta.project && !(m.thread || '').startsWith('p-') && timelineBox()?.box === $('messages')) {
       meta.append(el('span', 'handed', ` · 交给项目「${m.meta.project_name || '项目'}」`));
     }
-    item.append(face, bubble, meta);
+    if (sent && sent.length) item.append(meta);
+    else item.append(face, bubble, meta);
     return arrival(item, `m:${m.id}`);
   }
 
@@ -825,14 +835,91 @@
     if (near) scroller.scrollTop = scroller.scrollHeight;
   }
 
+  // --- files the person sends: chosen, dropped on the window or pasted; sent with the next message ---
+
+  const MAX_UPLOAD = 95 * 1024 * 1024;
+  const pending = [];
+  function addFiles(list) {
+    for (const file of list) {
+      if (pending.length >= 10) { showStatus('一次最多发 10 个文件'); break; }
+      if (file.size > MAX_UPLOAD) { showStatus(`${file.name} 太大了，最多 95 MB`); continue; }
+      if (!file.size) continue;
+      pending.push({ file, name: file.name || `粘贴的图片-${Date.now()}.png`,
+        url: (file.type || '').startsWith('image/') ? URL.createObjectURL(file) : null });
+    }
+    drawTray();
+  }
+  function drawTray() {
+    const tray = $('tray');
+    tray.hidden = !pending.length;
+    tray.replaceChildren(...pending.map((p, i) => {
+      const chip = el('span', 'chip');
+      if (p.url) {
+        const img = el('img');
+        img.src = p.url;
+        img.alt = '';
+        chip.append(img);
+      } else {
+        chip.append(el('span', 'chip-kind', (p.name.split('.').pop() || '?').slice(0, 4).toUpperCase()));
+      }
+      chip.append(el('span', 'chip-name', p.name));
+      const drop = el('button', 'chip-x', '×');
+      drop.type = 'button';
+      drop.title = '不发这个';
+      drop.addEventListener('click', () => {
+        const [gone] = pending.splice(i, 1);
+        if (gone && gone.url) URL.revokeObjectURL(gone.url);
+        drawTray();
+      });
+      chip.append(drop);
+      return chip;
+    }));
+  }
+  $('attach').addEventListener('click', () => $('attach-input').click());
+  $('attach-input').addEventListener('change', () => {
+    addFiles([...$('attach-input').files]);
+    $('attach-input').value = '';
+  });
+  $('input').addEventListener('paste', (event) => {
+    const files = [...((event.clipboardData && event.clipboardData.files) || [])];
+    if (files.length) {
+      event.preventDefault();
+      addFiles(files);
+    }
+  });
+  for (const zone of [$('view-chat')]) {
+    zone.addEventListener('dragover', (event) => {
+      if (event.dataTransfer && [...event.dataTransfer.types].includes('Files')) {
+        event.preventDefault();
+        zone.classList.add('dropping');
+      }
+    });
+    zone.addEventListener('dragleave', (event) => { if (event.target === zone) zone.classList.remove('dropping'); });
+    zone.addEventListener('drop', (event) => {
+      zone.classList.remove('dropping');
+      if (event.dataTransfer && event.dataTransfer.files.length) {
+        event.preventDefault();
+        addFiles([...event.dataTransfer.files]);
+      }
+    });
+  }
+
   $('composer').addEventListener('submit', async (event) => {
     event.preventDefault();
     const text = $('input').value.trim();
-    if (!text) return;
+    if (!text && !pending.length) return;
     $('send').disabled = true;
     try {
-      const row = await call('post', 'main', text);
+      const ids = [];
+      for (const [i, p] of pending.entries()) {
+        showStatus(`正在上传 ${i + 1}/${pending.length}：${p.name}`);
+        const sent = await call('upload', p.name, new Uint8Array(await p.file.arrayBuffer()));
+        ids.push(sent.id);
+      }
+      const row = await call('post', 'main', text, ids);
       $('input').value = '';
+      for (const p of pending.splice(0)) if (p.url) URL.revokeObjectURL(p.url);
+      drawTray();
       autosize();
       addMessage(row);
       showStatus('');

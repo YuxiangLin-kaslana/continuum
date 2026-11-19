@@ -425,7 +425,11 @@ AGENT_PROBE = (f'{REMOTE_PATH}; '
                'if command -v claude >/dev/null; then claude auth status 2>/dev/null | grep -q \'"loggedIn": true\' '
                '&& echo agent:claude_code || echo agent-out:claude_code; fi; '
                'if command -v codex >/dev/null; then codex login status 2>&1 | grep -q "^Logged in" '
-               '&& echo agent:codex || echo agent-out:codex; fi; true')
+               '&& echo agent:codex || echo agent-out:codex; fi; '
+               # How much the server has, for choosing where heavy work goes.
+               'echo "cap:$(nproc 2>/dev/null):$(free -m 2>/dev/null | awk \'/Mem:/{print $2":"$7}\'):'
+               '$(cut -d" " -f1 /proc/loadavg 2>/dev/null)"; '
+               'nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | sed "s/ /_/g; s/^/gpu:/"; true')
 AGENT_NAMES = {"claude_code": "Claude Code", "codex": "Codex"}
 
 
@@ -440,8 +444,32 @@ async def probe_agents(hosts: SshHosts, name: str) -> list[str] | None:
     if host is not None:
         host["agents"] = found
         host["agents_out"] = [kind for kind in AGENT_NAMES if f"agent-out:{kind}" in words]
+        capacity = _capacity(words)
+        if capacity:
+            host["capacity"] = capacity
         hosts.keep(name, host)
     return found
+
+
+def _capacity(words: list[str]) -> dict[str, Any] | None:
+    """cap:CPUS:MEM_MB:FREE_MB:LOAD and gpu:NAME, as the probe says them."""
+    line = next((w for w in words if w.startswith("cap:")), None)
+    if line is None:
+        return None
+    parts = line.split(":")[1:]
+    try:
+        cpus, total, free, load = int(parts[0]), int(parts[1]), int(parts[2]), float(parts[3])
+    except (ValueError, IndexError):
+        return None
+    gpu = next((w[4:].replace("_", " ") for w in words if w.startswith("gpu:") and len(w) > 4), None)
+    return {"cpus": cpus, "mem_gb": round(total / 1024), "free_gb": round(free / 1024), "load": load, "gpu": gpu}
+
+
+def describe_capacity(capacity: dict[str, Any] | None) -> str:
+    if not capacity:
+        return ""
+    text = f"{capacity['cpus']} 核 {capacity['mem_gb']}G（空闲 {capacity['free_gb']}G，负载 {capacity['load']:.1f}）"
+    return text + (f"，GPU {capacity['gpu']}" if capacity.get("gpu") else "")
 
 
 def signed_out(hosts: SshHosts, name: str, kind: str) -> None:

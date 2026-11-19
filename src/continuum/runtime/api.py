@@ -24,6 +24,7 @@ from continuum.core.stage import can_retry, ticket_stage
 
 from continuum.plugins.cli_agents import resolve
 
+from .files import MAX_UPLOAD, Files
 from .integrations import EMAIL_PRESETS, IntegrationError
 from .projects import project_of_thread
 from .ssh import APPROVALS, Host, survey
@@ -35,7 +36,9 @@ THREAD = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class PostMessage(BaseModel):
-    text: str = Field(min_length=1, max_length=20000)
+    text: str = Field(default="", max_length=20000)
+    # Files the person sent first (POST /api/v1/files), to go with the words.
+    files: list[str] = Field(default=[], max_length=10)
 
 
 class LoginRequest(BaseModel):
@@ -192,8 +195,33 @@ def create_app(rt: Runtime) -> FastAPI:
             if project.state not in ("active", "paused"):
                 raise HTTPException(409, "这个项目已经结束了")
             meta = {"project": project.id, "project_name": project.name}
+        if not body.text.strip() and not body.files:
+            raise HTTPException(422, "消息是空的")
+        if body.files:
+            sent = []
+            for ident in body.files:
+                found = rt.files.get(ident)
+                if found is None or found[1].get("owner") != user:
+                    raise HTTPException(404, "没有这个文件")
+                sent.append(Files.shown(found[1]))
+            meta = {**(meta or {}), "files": sent}
         row = kind.post(ctx, user, thread_name(thread), body.text, meta=meta)
         return {**row, "project": project_id}
+
+    @app.post("/api/v1/files", status_code=201)
+    async def upload(request: Request, name: str = Query(min_length=1, max_length=200),
+                     user: str = Depends(user_of)) -> dict[str, Any]:
+        """A file the person sends: its bytes as the body. It goes with a message once that message names it."""
+        if int(request.headers.get("content-length") or 0) > MAX_UPLOAD:
+            raise HTTPException(413, f"文件太大，最多 {MAX_UPLOAD // 1024 // 1024} MB")
+        data = await request.body()
+        if not data:
+            raise HTTPException(422, "文件是空的")
+        try:
+            meta = await asyncio.to_thread(rt.files.keep, user, name, data, MAX_UPLOAD, "person")
+        except ValueError as error:
+            raise HTTPException(413, str(error)) from None
+        return Files.shown(meta)
 
     @app.get("/api/v1/tickets")
     async def tickets(open_only: bool = Query(default=False, alias="open"), user: str = Depends(user_of)) \

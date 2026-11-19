@@ -724,3 +724,57 @@ def test_answers_draw_code_formulas_diagrams_charts_and_the_files_the_assistant_
     # Mermaid sets styles on its scratch drawing while it measures; the picture it makes holds its own.
     refused = [r for r in refused if "mermaid.min.js" not in r]
     assert not refused, "\n".join(sorted(set(refused)))
+
+
+@pytest.mark.skipif(_browser() is None, reason="needs playwright")
+def test_the_person_sends_pictures_and_recordings_chosen_dropped_or_pasted():
+    import base64
+
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+    sync_playwright = _browser()
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_context(viewport={"width": 520, "height": 780}).new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.add_init_script(path=str(DESKTOP / "test" / "fake-bridge.js"))
+        page.goto((DESKTOP / "renderer" / "index.html").as_uri())
+        page.wait_for_selector("#app[data-ready]")
+        page.fill("#username", "me")
+        page.fill("#password", "good-password")
+        page.click("#connect")
+        page.wait_for_selector("#main:not([hidden])")
+        # Chosen with the paperclip, and one dropped on the window.
+        page.set_input_files("#attach-input", files=[
+            {"name": "shot.png", "mimeType": "image/png", "buffer": png},
+            {"name": "memo.mp3", "mimeType": "audio/mpeg", "buffer": b"ID3fake-audio"}])
+        page.evaluate("""() => {
+            const data = new DataTransfer();
+            data.items.add(new File(['x'], 'notes.txt', { type: 'text/plain' }));
+            const zone = document.getElementById('view-chat');
+            zone.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+        }""")
+        assert page.locator("#tray .chip-name").all_inner_texts() == ["shot.png", "memo.mp3", "notes.txt"]
+        assert page.locator("#tray .chip img").count() == 1  # the picture shows small
+        page.locator("#tray .chip", has_text="notes.txt").locator(".chip-x").click()
+        assert page.locator("#tray .chip").count() == 2
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-attach.png")
+        # A picture alone is a message too; words go with it when written.
+        page.fill("#input", "看看这张截图和录音")
+        page.press("#input", "Enter")
+        # The page's CSP forbids wait_for_function's eval; ask until it is so.
+        for _ in range(100):
+            if page.evaluate("() => !!window.__fake.lastPost && window.__fake.lastPost.files.length === 2"):
+                break
+            page.wait_for_timeout(50)
+        assert page.evaluate("window.__fake.lastPost.text") == "看看这张截图和录音"
+        assert page.is_hidden("#tray")
+        sent = page.locator(".msg.user.with-files").last
+        sent.locator(".file-card[data-file=up1] img.file-image").wait_for()
+        assert sent.locator(".file-card .file-name").all_inner_texts() == ["shot.png", "memo.mp3"]
+        assert "看看这张截图和录音" in sent.inner_text()
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-sent.png")
+        browser.close()
+    assert not errors, errors

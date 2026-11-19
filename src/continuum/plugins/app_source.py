@@ -115,6 +115,7 @@ class AppSource:
             "INSERT INTO messages (user, thread, role, text, at, meta) VALUES (?, ?, ?, ?, ?, ?)",
             (user, thread, role, text, at.isoformat(), json.dumps(meta, ensure_ascii=False) if meta else None))
         row_id = int(cursor.lastrowid or 0)
+        text = self.with_attachments(ctx, text, meta)
         # Every message is a Thread of its own: it reaches no earlier work by itself. The router decides whether it
         # is something new or continues a project, and `forward` takes it there.
         ref = ThreadRef(source=ctx.instance, id=thread_id(user, f"{thread}/{row_id}"))
@@ -127,6 +128,23 @@ class AppSource:
         self.publish(user, {"type": "message", "message": row})
         return row
 
+    @staticmethod
+    def with_attachments(ctx: Any, text: str, meta: dict[str, Any] | None) -> str:
+        """What the assistant reads of a message: its words, then each file the person sent with it and where it is
+        on this host (the files sit beside this Source's own data)."""
+        files = (meta or {}).get("files") or []
+        if not files:
+            return text
+        folder = ctx.data_dir.parent / "files"
+        lines = []
+        for f in files:
+            where = folder / str(f.get("id", ""))
+            path = next(iter(sorted(where.glob("file*"))), where / "data")
+            size = int(f.get("size") or 0)
+            shown = f"{size / 1024 / 1024:.1f} MB" if size >= 1024 * 1024 else f"{size / 1024:.0f} KB"
+            lines.append(f"[附件] {f.get('name')}（{f.get('mime')}，{shown}）：{path}")
+        return "\n".join([text.strip(), *lines]).strip()
+
     def forward(self, ctx: Any, user: str, row_id: int, to_thread: str, display_thread: str,
                 meta: dict[str, Any]) -> bool:
         """Hand a person's message to the work it continues: the same words, as a Trigger on that work's Thread (whose
@@ -138,7 +156,8 @@ class AppSource:
         ref = ThreadRef(source=ctx.instance, id=to_thread)
         ctx.receive(Trigger(
             id=f"{ctx.instance}:{row_id}:to:{to_thread}", source=ctx.instance, threads=(ref,),
-            actor=ActorRef(source=ctx.instance, id=user), human=True, addressed="direct", at=at, text=row["text"],
+            actor=ActorRef(source=ctx.instance, id=user), human=True, addressed="direct", at=at,
+            text=self.with_attachments(ctx, row["text"], row.get("meta")),
             channel=ChannelRef(source=ctx.instance, thread=ref.id,
                                address={"user": user, "thread": display_thread, "message": str(row_id)})))
         self.update_meta(ctx, row_id, {**(row.get("meta") or {}), **meta})

@@ -391,7 +391,7 @@ def test_a_job_on_one_server_goes_to_the_agent_on_that_server_with_full_access(t
             self.kept = {"name": "crm"}
 
         async def run(self, name, command, timeout=60):
-            return 0, "agent:claude_code\nagent-out:codex\n"
+            return 0, "agent:claude_code\nagent-out:codex\ncap:8:31890:11264:1.81\ngpu:NVIDIA_L4\n"
 
         def get(self, name):
             return dict(self.kept)
@@ -402,6 +402,29 @@ def test_a_job_on_one_server_goes_to_the_agent_on_that_server_with_full_access(t
     hosts = Probed()
     assert asyncio.run(ssh_rules.probe_agents(hosts, "crm")) == ["claude_code"] and hosts.kept["agents"] == ["claude_code"]
     assert hosts.kept["agents_out"] == ["codex"]  # installed, signed out
+    assert hosts.kept["capacity"] == {"cpus": 8, "mem_gb": 31, "free_gb": 11, "load": 1.81, "gpu": "NVIDIA L4"}
+    assert ssh_rules.describe_capacity(hosts.kept["capacity"]) == "8 核 31G（空闲 11G，负载 1.8），GPU NVIDIA L4"
     # A run that finds the sign-in gone takes the agent off the list.
     ssh_rules.signed_out(hosts, "crm", "claude_code")
     assert hosts.kept["agents"] == [] and hosts.kept["agents_out"] == ["claude_code", "codex"]
+
+
+def test_pictures_go_to_claude_to_be_looked_at_and_without_claude_the_worker_hears_why(tmp_path):
+    from continuum.plugins import media
+
+    log = tmp_path / "log"
+    shot = tmp_path / "shot.png"
+    shot.write_bytes(b"\x89PNG fake")
+    config = ClaudeCodeConfig(command=fake(tmp_path, "claude", CLAUDE), isolation="none", env={"FAKE_LOG": str(log)})
+    job = FakeJob(tmp_path / "work")
+    said = []
+    answer = asyncio.run(media.perceive(job, config, [shot, tmp_path / "gone.png"], "报的什么错？", tmp_path / "look",
+                                        said.append))
+    assert answer == "跑完了，输出 hi，写了 note.txt。"
+    [argv] = calls(log)
+    prompt = argv[argv.index("-p") + 1]
+    assert "问题：报的什么错？" in prompt and "用 Read 打开 01-shot.png" in prompt and "gone.png：找不到这个文件" in prompt
+    assert (tmp_path / "look" / "01-shot.png").read_bytes() == b"\x89PNG fake"  # where Claude may read it
+    assert said == ["处理 shot.png…", "Claude 正在看…"]
+    without = asyncio.run(media.perceive(job, None, [shot], "?", tmp_path / "look2"))
+    assert without.startswith("错误：看不了") and "Claude" in without

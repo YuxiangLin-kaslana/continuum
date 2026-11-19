@@ -177,8 +177,10 @@ handle('config:logout', async () => {
 handle('api:threads', () => client.request('GET', '/api/v1/threads'));
 handle('api:history', (thread, after) =>
   client.request('GET', `/api/v1/threads/${encodeURIComponent(thread)}/messages?after=${Number(after) || 0}`));
-handle('api:post', (thread, text) =>
-  client.request('POST', `/api/v1/threads/${encodeURIComponent(thread)}/messages`, { text }));
+handle('api:post', (thread, text, files) =>
+  client.request('POST', `/api/v1/threads/${encodeURIComponent(thread)}/messages`, { text, files: files || [] }));
+handle('api:upload', (name, bytes) => client.upload(`/api/v1/files?name=${encodeURIComponent(String(name || 'file'))}`,
+  Buffer.from(bytes)));
 handle('api:steps', (thread) =>
   client.request('GET', `/api/v1/threads/${encodeURIComponent(thread)}/steps`));
 handle('api:tickets', () => client.request('GET', '/api/v1/tickets'));

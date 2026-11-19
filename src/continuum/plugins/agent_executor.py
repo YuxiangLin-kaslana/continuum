@@ -31,7 +31,7 @@ from continuum.runtime import ssh as ssh_rules
 from continuum.runtime.files import MAX_FILE
 from continuum.runtime.projects import zone
 
-from . import cli_agents, sandbox
+from . import cli_agents, media, sandbox
 from .cli_agents import ClaudeCodeConfig, CodexConfig
 from .sandbox import SandboxConfig
 
@@ -113,7 +113,11 @@ SSH_RULES = """
 - 只涉及 Continuum 自己这台机器：交给本机的 claude_code / codex（有的话）。
 - 要在多台服务器之间协调（对比、迁移、联调、同时查好几台）：由你和 DeepSeek 子 Worker 用 ssh 来做；其中某一部分如果
   只在一台服务器上，也可以交给那台的 remote_agent。
-各服务器上有哪些编程助手：{agents}
+- 复杂、耗资源的事（写或改较多代码、长时间的分析、大量计算或数据处理、构建、批量下载转换、模型推理）不在 Continuum
+  这台机器上做（{local}）：即使它不属于哪台服务器，也用 remote_agent 交给一台配置够、负载低、有编程助手的服务器去做
+  （优先开发机，避开在跑重要生产服务的机器；需要的文件用 scp/ssh 传过去，结果用 show_file 取回给人）。
+  简单的查询、一两条命令的事自己做就行。
+各服务器（编程助手；配置）：{agents}
 要查几台服务器、几个文件这类互不依赖的事，在同一步里一起发出多个工具调用，它们会同时执行（同一台服务器上的命令仍按顺序）。
 先用 ssh_hosts 看清单；去一台机器干活前用 ssh_profile 看它上面跑着什么、在开发什么。尽量用只读命令；会改东西的命令（重启、改文件、装包、删除）只在请求需要时用，reason 写清楚，
 人批准后才会执行；被拒绝就不要换个写法再试，向人说明。不要读取或输出私钥、密码等机密。
@@ -153,6 +157,16 @@ SHOW_TOOL = tool(
     {"path": {"type": "string", "description": "文件路径；相对路径在工作目录下"},
      "host": {"type": "string", "description": "文件在哪台服务器上（ssh_hosts 里的名字）；不写就是这台机器"},
      "caption": {"type": "string"}}, required=["path"])
+PERCEIVE_TOOL = tool(
+    "perceive",
+    "看图片、读 PDF、看视频、听音频，回答你关于它们的问题：交给 Claude 来看（视频会抽取画面并把语音转成文字，音频会转成文字）。"
+    "人发来的附件、你截的图、从服务器取回的录音都可以；一次可以给几个文件。",
+    {"paths": {"type": "array", "items": {"type": "string"}, "description": "文件路径（这台机器上的；相对路径在工作目录下）"},
+     "question": {"type": "string", "description": "要从这些文件里知道什么"}}, required=["paths", "question"])
+PERCEIVE_RULES = """
+人发来的文件会以“[附件] 名字（类型，大小）：路径”出现在消息里。要知道图片、视频、音频、PDF 里有什么，用 perceive，
+不要用 shell 去猜；问题要问具体（比如“截图里报的是什么错、在哪一行”）。
+"""
 PRESENT_RULES = """
 【给人看的形式】人的 App 能显示丰富的内容，汇报和消息里按内容选最合适的形式，但不要为了花哨而用：
 - 多项对比、清单数据用 Markdown 表格；代码和命令用带语言的代码块（```python）。
@@ -273,7 +287,7 @@ ENDS_TURN = {"ready", "blocked", "failed", "dropped"}
 # The tools whose work a person sees as steps of the turn; the rest are the worker's calls to the host, whose words
 # reach the person as messages.
 SHOWN = {"shell", "read_file", "write_file", "list_files", "claude_code", "codex", "ssh", "remote_agent", "dispatch",
-         "show_file",
+         "show_file", "perceive",
          *INTEGRATION_STEP}
 SHOWN_OUTPUT = 4000
 
@@ -353,10 +367,21 @@ def _ssh_rules(job: Any) -> str:
     for h in ssh.list():
         if "agents" not in h:
             continue
-        has = "、".join(ssh_rules.AGENT_NAMES[k] for k in h["agents"]) or "无"
+        has = "、".join(ssh_rules.AGENT_NAMES[k] for k in h["agents"]) or "无编程助手"
         out = "、".join(ssh_rules.AGENT_NAMES[k] for k in h.get("agents_out") or [])
-        lines.append(f"{h['name']}（{has}{f'；{out} 未登录' if out else ''}）")
-    return SSH_RULES.format(agents="；".join(lines) or "还不知道（remote_agent 会先查）")
+        power = ssh_rules.describe_capacity(h.get("capacity"))
+        lines.append(f"{h['name']}（{has}{f'，{out} 未登录' if out else ''}{f'；{power}' if power else ''}）")
+    return SSH_RULES.format(agents="；".join(lines) or "还不知道（remote_agent 会先查）", local=_local_capacity())
+
+
+def _local_capacity() -> str:
+    import os
+
+    try:
+        memory = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024 ** 3
+        return f"它只有 {os.cpu_count()} 核 {memory:.0f}G"
+    except (ValueError, OSError):
+        return f"它只有 {os.cpu_count()} 核"
 
 
 def _host_rules(config: AgentConfig, job: Any) -> str:
@@ -516,7 +541,7 @@ class AgentExecutor:
         def offered() -> list[dict[str, Any]]:
             # Asked again at every step: a tool the person connects during the turn can be used at once.
             now_connected = [k for k in INTEGRATION_TOOLS if job.integrations and k in job.integrations.connected()]
-            return [*_basic(config), *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
+            return [*_basic(config), PERCEIVE_TOOL, *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
                     *(PROJECT_TOOLS if job.projects else []), *([SHOW_TOOL] if job.projects else []),
                     *([DISPATCH] if job.crew else []),
                     *(t for kind in now_connected for t in INTEGRATION_TOOLS[kind]),
@@ -532,6 +557,7 @@ class AgentExecutor:
                 system += PRESENT_RULES
             system += LEAD_RULES.format(most=MAX_DISPATCH) if job.crew else ""
             system += _host_rules(config, job)
+            system += PERCEIVE_RULES
             if job.integrations is not None:
                 missing = [TOOL_KINDS[k] for k in TOOL_KINDS if k not in connected]
                 def named(kind: str) -> str:
@@ -619,6 +645,8 @@ class AgentExecutor:
             return await self._remote_agent(job, config, key, args), False
         if name == "show_file":
             return await self._show_file(job, config, key, args), False
+        if name == "perceive":
+            return await self._perceive(job, config, key, args), False
         if name == "dispatch":
             return await self._dispatch(job, config, key, args), False
         if name in INTEGRATION_STEP:
@@ -748,9 +776,9 @@ class AgentExecutor:
         model = job.model
         delegates = getattr(job, "delegates", None) or {}
         connected = job.integrations.connected() if getattr(job, "integrations", None) else set()
-        tools = [*_basic(config)[:4], *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
+        tools = [*_basic(config)[:4], PERCEIVE_TOOL, *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
                  *(t for kind in INTEGRATION_TOOLS if kind in connected for t in INTEGRATION_TOOLS[kind]), FINISH]
-        system = SUB_SYSTEM.format(folder=f"sub-{number}") + _ssh_rules(job) + _host_rules(config, job)
+        system = SUB_SYSTEM.format(folder=f"sub-{number}") + _ssh_rules(job) + _host_rules(config, job) + PERCEIVE_RULES
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
             {"role": "user", "content": f"项目背景：\n{job.assignment}\n\n你的子任务（{label}）：\n{task}"}]
@@ -783,6 +811,31 @@ class AgentExecutor:
             return f"（用完了 {config.max_steps} 步，没做完）{words}"
         except ModelError as error:
             return f"模型调用失败：{error}"
+
+    async def _perceive(self, job, config: AgentConfig, key: str, args: dict[str, Any]) -> str:
+        """Pictures, PDFs, video and sound, looked at by Claude for the worker."""
+        if "_invalid" in args:
+            return f"错误：参数不是合法的 JSON：{args['_invalid'][:200]}"
+        raw = [str(p) for p in args.get("paths") or [] if str(p).strip()][:10]
+        if not raw:
+            return "错误：paths 是空的"
+        question = str(args.get("question") or "").strip()
+        names = "、".join(PurePosixPath(p).name for p in raw)
+        step = {"type": "step", "key": key, "name": "perceive", "input": f"{names}：{question}"}
+        job.activity({**step, "status": "running", "output": ""})
+        try:
+            paths = [_inside(job.workdir, p, True) for p in raw]
+        except ValueError as error:
+            job.activity({**step, "status": "error", "output": str(error)})
+            return f"错误：{error}"
+        claude = (getattr(job, "delegates", None) or config.delegates()).get("claude_code")
+        if claude is not None and config.sandbox.kind == "host":
+            claude = claude.model_copy(update={"full_access": True})
+        folder = job.workdir / f"look-{key[-8:]}"
+        progress = lambda words: job.activity({**step, "status": "running", "output": words})  # noqa: E731
+        answer = await media.perceive(job, claude, paths, question, folder, progress)
+        job.activity({**step, "status": "error" if answer.startswith("错误：") else "done", "output": _clip(answer)})
+        return answer if len(answer) <= 20000 else answer[:20000] + "\n...[后面截断]"
 
     async def _show_file(self, job, config: AgentConfig, key: str, args: dict[str, Any]) -> str:
         """A file put in the person's conversation: from here, or fetched from one of their servers."""

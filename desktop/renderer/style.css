@@ -570,3 +570,17 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 /* Letters in a formula as plain italics: the math-italic code points need a math font a computer may not have. */
 .bubble math mi { text-transform: none; font-style: italic; }
 .bubble math mi[mathvariant="normal"] { font-style: normal; }
+/* --- files the person sends --- */
+.composer { flex-wrap: wrap; }
+.composer .tray { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+.composer .attach { flex: none; height: 42px; width: 38px; display: grid; place-items: center; background: transparent; border: 1px solid var(--line-2); color: var(--soft); cursor: pointer; }
+.composer .attach:hover { color: var(--teal); border-color: var(--teal-line); }
+.tray .chip { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; padding: 3px 4px 3px 3px; border: 1px solid var(--line-2); background: var(--panel); font-size: 12px; color: var(--soft); }
+.tray .chip img { width: 30px; height: 30px; object-fit: cover; }
+.tray .chip-kind { font: 700 9.5px/1 var(--sans); color: var(--teal); border: 1px solid var(--teal-line); padding: 4px 4px; }
+.tray .chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tray .chip-x { background: none; border: 0; color: var(--dim); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 3px; }
+.tray .chip-x:hover { color: #e5677d; }
+#view-chat.dropping { outline: 2px dashed var(--teal-line); outline-offset: -6px; }
+.msg.user.with-files .sent-files { grid-column: 2; justify-self: end; width: min(100%, 360px); }
+.msg.user.with-files .sent-files .file-card { margin: 4px 0 0; }
