@@ -118,6 +118,12 @@ class SshHosts:
         self.settings = settings
         self.approvals = Approvals()
         self.store.db.executescript(SCHEMA)
+        # Written afresh at each start, so a config from an older version gets what this one writes.
+        self._fresh = False
+
+    def _ensure_config(self) -> None:
+        if not self._fresh or not self.config_path.exists():
+            self.write_config()
 
     # --- the key ---
 
@@ -218,6 +224,7 @@ class SshHosts:
         tmp.write_text("\n".join(lines), encoding="utf-8")
         tmp.chmod(0o600)
         tmp.replace(self.config_path)
+        self._fresh = True
 
     def _forget_key(self, host: dict[str, Any]) -> None:
         """A host whose address changed is a new host: its old pinned key goes."""
@@ -246,8 +253,7 @@ class SshHosts:
         """The command line that reaches a host; the command to run there goes after it."""
         if self.get(name) is None:
             raise KeyError(name)
-        if not self.config_path.exists():
-            self.write_config()
+        self._ensure_config()
         return [self.settings.ssh_command, "-F", str(self.config_path), alias(name)]
 
     def keep(self, name: str, host: dict[str, Any]) -> None:
@@ -257,8 +263,7 @@ class SshHosts:
         """Run one command on a host; (exit code or None on a timeout, output)."""
         if self.get(name) is None:
             raise KeyError(name)
-        if not self.config_path.exists():
-            self.write_config()
+        self._ensure_config()
         process = await asyncio.create_subprocess_exec(
             self.settings.ssh_command, "-F", str(self.config_path), alias(name), command,
             stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
