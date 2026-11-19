@@ -315,7 +315,7 @@ def test_the_dispatcher_hands_a_job_on_one_server_to_the_coding_agent_there(tmp_
     history, steps, seen, host = asyncio.run(main())
     assert history[-1]["text"] == "crm 上的 Claude Code 说：跑完了，输出 hi，写了 note.txt。"
     # The dispatcher was told who does what; the server's agents were found and kept.
-    assert "【分工】" in seen[0][0]["content"] and host["agents"] == ["claude_code"]
+    assert "【在哪做、谁来做】" in seen[0][0]["content"] and host["agents"] == ["claude_code"]
     assert "crm 上的 Codex没有装（可用的：Claude Code）" in seen[1][-1]["content"]
     shown = [s for s in steps if s["name"] == "remote_agent"]
     assert [s["status"] for s in shown] == ["done"] and shown[0]["input"] == "crm  $ Claude Code：查 crm 为什么慢"
