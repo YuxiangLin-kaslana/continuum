@@ -91,6 +91,22 @@ class HostState(BaseModel):
     fingerprint: str | None = None
 
 
+def _socket_folder(preferred: Path) -> Path | None:
+    """Where the kept connections' sockets go: beside the config when its path is short enough, else a private
+    folder of this user's under /tmp; None (no keeping) when neither will do."""
+    for folder in (preferred, Path("/tmp") / f"continuum-ssh-{os.getuid()}"):
+        if len(str(folder)) + 41 >= 100:
+            continue
+        try:
+            folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+            info = folder.stat()
+        except OSError:
+            continue
+        if info.st_uid == os.getuid() and info.st_mode & 0o077 == 0:
+            return folder
+    return None
+
+
 def alias(name: str) -> str:
     return f"continuum-{name}"
 
@@ -182,12 +198,19 @@ class SshHosts:
         folder = self.config_path.parent
         folder.mkdir(mode=0o700, parents=True, exist_ok=True)
         lines = ["# Written by Continuum from its list of SSH servers; changes here are overwritten.", ""]
+        # One connection per server, kept for a while: a command then costs a round trip, not a handshake (from
+        # London to a US server, 0.2s instead of 1.2-1.7s). %C names it by host, port and user, so a server whose
+        # address changes gets a connection of its own. A socket path must stay under ~100 bytes.
+        sockets = _socket_folder(folder / "cm")
+        multiplex = sockets is not None
         for host in self._rows():
             lines += [f"Host {alias(host['name'])}", f"  HostName {host['address']}", f"  Port {host['port']}",
                       f"  User {host['user']}", f"  IdentityFile {self.key_path}", "  IdentitiesOnly yes",
                       f"  UserKnownHostsFile {self.known_hosts}", "  StrictHostKeyChecking accept-new",
                       "  HashKnownHosts no", "  BatchMode yes", f"  ConnectTimeout {self.settings.connect_timeout_seconds}",
                       "  ForwardAgent no", "  ClearAllForwardings yes", "  ServerAliveInterval 15"]
+            if multiplex:
+                lines += ["  ControlMaster auto", f"  ControlPath {sockets}/%C", "  ControlPersist 10m"]
             if host.get("jump"):
                 lines.append(f"  ProxyJump {alias(host['jump'])}")
             lines.append("")

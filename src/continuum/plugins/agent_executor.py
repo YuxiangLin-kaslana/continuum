@@ -254,7 +254,7 @@ SHOWN_OUTPUT = 4000
 
 class AgentConfig(BaseModel):
     model: str = "default"
-    max_steps: int = Field(default=40, ge=1, le=500)
+    max_steps: int = Field(default=100, ge=1, le=500)
     sandbox: SandboxConfig = SandboxConfig()
     # The team's own instructions, added to the system prompt.
     instructions: str = ""
@@ -289,6 +289,20 @@ HOST_SHELL = tool("shell", "在这台主机上直接执行一条 shell 命令（
 def _basic(config: AgentConfig) -> list[dict[str, Any]]:
     """The shell and file tools, the shell described as what it is."""
     return [HOST_SHELL, *TOOLS[1:]] if config.sandbox.kind == "host" else TOOLS
+
+
+WRAP_UP = ("【系统】这一轮的步数用完了，不能再调用工具。现在直接写给人：已经查到 / 做成了什么（具体的数字、结论、"
+           "产物路径），还差什么没做。不要写过程。")
+
+
+async def _wrap_up(model: Any, messages: list[dict[str, Any]], config: AgentConfig) -> str:
+    """The last words of a turn that ran out of steps: what it has, without any more tool calls."""
+    try:
+        message = await model.complete([*messages, {"role": "user", "content": WRAP_UP}], **config.extra)
+        words = (message.get("content") or "").strip()
+    except Exception:  # noqa: BLE001 - the person still hears that the turn stopped
+        words = ""
+    return words or "没来得及整理出结论。"
 
 
 def _ssh_rules(job: Any) -> str:
@@ -525,7 +539,10 @@ class AgentExecutor:
                 if ended:
                     return
                 await take_inputs()
-            job.report("blocked", f"用了 {config.max_steps} 步还没做完，需要人看一下。")
+            # Out of steps: what it found so far still reaches the person. (Seen live: a finished report sat in the
+            # workspace, the turn ended "blocked" with no word to anyone, and the project was closed as idle.)
+            words = await _wrap_up(model, messages, config)
+            job.report("ready", f"{words}\n\n（这一轮用完了 {config.max_steps} 步，上面是目前的结果；要接着做就回复“继续”。）")
         except ModelError as error:
             # Like any failure, it waits for the person: a reply, or a retry, lets the worker go on.
             job.report("failed", f"模型调用失败：{error}"[:500],
@@ -711,7 +728,8 @@ class AgentExecutor:
                     else:
                         result, _ = await self._shown_call(sub, config, call_id, name, args)
                     messages.append({"role": "tool", "tool_call_id": call_id, "content": result})
-            return f"用了 {config.max_steps} 步还没做完。"
+            words = await _wrap_up(model, messages, config)
+            return f"（用完了 {config.max_steps} 步，没做完）{words}"
         except ModelError as error:
             return f"模型调用失败：{error}"
 

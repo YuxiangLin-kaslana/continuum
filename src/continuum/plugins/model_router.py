@@ -36,6 +36,8 @@ ROUTER = """你是 Continuum 的路由器。你只决定一条请求要不要变
   （比如“好，我开一个项目去核对 MRP 的进展，做完告诉你。”）；name 是 2-4 个英文单词的短名（小写、连字符）。
 - ignore：只有纯客套（谢谢、好的、收到、早上好）、对已有工单的重复请求（已有工单列在下面），或者明显不是对你说的话。
   reason 写一句理由。被 ignore 的消息不会得到任何回复，所以拿不准时选 accept。
+如果下面列出了“这个话题上已有的工单”，这条消息已经在那张工单的话题里：人在追问进展、要结论、补充或让它接着做，都选 accept——
+会交给那张工单接着做（已结束的会重新打开），不会另开一张。
 """
 FORWARDING = """
 下面列出了这个人进行中（或刚结束）的项目，和你们最近的对话（标着每条属于哪个项目）。如果这条消息是其中某个项目的
@@ -119,7 +121,9 @@ class ModelRouter:
             raise LookupError(f"no model named {config.model!r}")
         if candidate.strength != "explicit":
             return await self._assess_inferred(ctx, candidate, model, config)
-        projects = self._continuable(ctx, candidate)
+        # A message already in a ticket's own Thread (one forwarded there, say) belongs to that ticket: offering to
+        # forward it again sent it round in a circle until it was dropped. (Seen live: "有结论吗" was never answered.)
+        projects = [] if candidate.tickets else self._continuable(ctx, candidate)
         recent = self._recent(ctx, candidate) if self._conversational(candidate) else []
         system = ROUTER + (FORWARDING if projects else "") + (
             f"\n团队的要求：\n{config.instructions}" if config.instructions else "")

@@ -82,6 +82,7 @@ def test_admins_add_test_and_remove_servers_and_others_cannot(tmp_path):
                 assert "  ProxyJump continuum-bastion" in config and "StrictHostKeyChecking accept-new" in config
                 assert f"IdentityFile {tmp_path / 'keys' / 'continuum_ed25519'}" in config
                 assert "IdentitiesOnly yes" in config and "BatchMode yes" in config
+                assert "ControlMaster auto" in config and "ControlPersist 10m" in config  # one connection, kept
 
                 ok = (await c.post("/api/v1/ssh/hosts/andrew/test", headers=me)).json()
                 assert ok["state"]["ok"] is True and ok["state"]["message"] == "andrew-box"

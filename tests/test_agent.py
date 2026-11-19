@@ -467,3 +467,55 @@ def test_a_transcript_cut_off_while_tools_ran_is_mended_before_it_goes_back_to_t
         ("user", None)]
     assert "被中断了" in mended[4]["content"]
     assert _mend(mended) == mended  # whole transcripts are left as they are
+
+
+def test_a_turn_out_of_steps_still_tells_the_person_what_it_found(tmp_path):
+    """Seen live: a lead used all its steps with its report written, ended "blocked" with no word to the person, and
+    was closed as idle. Now its last words, with no tool to call, go to the person."""
+    router = ScriptedModel(call("decide", decision="accept", title="查", scope="查", acknowledgement="好。", reason="r"))
+    worker = ScriptedModel(
+        call("shell", command="echo 1"), call("shell", command="echo 2"),
+        lambda messages: {"role": "assistant", "content": "查到瓶颈在模型首字，约 6 秒；还没查收尾阶段。"
+                          if "步数用完了" in messages[-1]["content"] else "?"})
+
+    async def main():
+        rt = agent_runtime(tmp_path, router, worker, executor={"kind": "agent", "config": {
+            "model": "worker", "max_steps": 2, "sandbox": {"kind": "bwrap" if sandbox.available() else "none"}}})
+        try:
+            post(tmp_path, "查一下")
+            await drive(rt, lambda: len(replies(tmp_path)) == 2, timeout=15)
+        finally:
+            await rt.close()
+
+    asyncio.run(main())
+    said = replies(tmp_path)[-1][1]
+    assert said.startswith("查到瓶颈在模型首字，约 6 秒") and "用完了 2 步" in said
+
+
+def test_a_message_already_in_a_tickets_thread_is_not_forwarded_round_again(tmp_path):
+    """Seen live: "有结论吗" was forwarded to an ended project, came back to the router from its thread, was forwarded
+    again, and ended as nobody's."""
+    from types import SimpleNamespace as NS
+
+    from continuum.plugins.model_router import ModelRouter, ModelRouterConfig
+
+    class Projects:
+        def open_for(self, user):
+            raise AssertionError("not asked: the message already has its ticket")
+
+    seen = []
+
+    class Router(ScriptedModel):
+        async def complete(self, messages, tools=None, tool_choice=None, **extra):
+            seen.append(messages)
+            return await super().complete(messages, tools, tool_choice, **extra)
+
+    model = Router(call("decide", decision="accept", title="排查", scope="要结论", acknowledgement="好。", reason="追问"))
+    trigger = NS(id="app:154:to:me/main/150", actor=NS(id="me"), human=True, addressed="direct", text="有结论吗",
+                 channel=NS(address={"user": "me", "thread": "main", "message": 154}))
+    ticket = NS(title="排查 CRM 调用 Omanus 慢", ended=NS(outcome="stopped"))
+    candidate = NS(strength="explicit", triggers=[trigger], tickets=[ticket], eval_id="e1")
+    ctx = NS(config=ModelRouterConfig(), models={"default": model}, projects=Projects())
+    outcome = asyncio.run(ModelRouter().assess(ctx, candidate))
+    assert type(outcome).__name__ == "Accept"
+    assert "已有的工单" in seen[0][1]["content"] and "forward" not in seen[0][0]["content"].split("ignore：")[0]
