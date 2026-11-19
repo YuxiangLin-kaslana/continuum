@@ -110,6 +110,7 @@ SSH_RULES = """
 - 要在多台服务器之间协调（对比、迁移、联调、同时查好几台）：由你和 DeepSeek 子 Worker 用 ssh 来做；其中某一部分如果
   只在一台服务器上，也可以交给那台的 remote_agent。
 各服务器上有哪些编程助手：{agents}
+要查几台服务器、几个文件这类互不依赖的事，在同一步里一起发出多个工具调用，它们会同时执行（同一台服务器上的命令仍按顺序）。
 先用 ssh_hosts 看清单；去一台机器干活前用 ssh_profile 看它上面跑着什么、在开发什么。尽量用只读命令；会改东西的命令（重启、改文件、装包、删除）只在请求需要时用，reason 写清楚，
 人批准后才会执行；被拒绝就不要换个写法再试，向人说明。不要读取或输出私钥、密码等机密。
 """
@@ -289,6 +290,19 @@ HOST_SHELL = tool("shell", "在这台主机上直接执行一条 shell 命令（
 def _basic(config: AgentConfig) -> list[dict[str, Any]]:
     """The shell and file tools, the shell described as what it is."""
     return [HOST_SHELL, *TOOLS[1:]] if config.sandbox.kind == "host" else TOOLS
+
+
+# Calls that only look, or act on different servers, run side by side when a step asks for several at once.
+SIDE_BY_SIDE = {"ssh", "ssh_profile", "ssh_hosts", "read_file", "list_files", "remote_agent"}
+
+
+def _side_by_side(calls: list[tuple[str, str, dict[str, Any]]]) -> bool:
+    """Whether a step's calls may run at once: all of the kinds above, and no two on the same server (one server's
+    commands keep their order)."""
+    if len(calls) < 2 or any(name not in SIDE_BY_SIDE for _, name, _ in calls):
+        return False
+    hosts = [str(args.get("host")) for _, name, args in calls if name in ("ssh", "remote_agent")]
+    return len(hosts) == len(set(hosts))
 
 
 WRAP_UP = ("【系统】这一轮的步数用完了，不能再调用工具。现在直接写给人：已经查到 / 做成了什么（具体的数字、结论、"
@@ -531,8 +545,11 @@ class AgentExecutor:
                         job.report("ready", words)
                     return
                 ended = False
-                for call_id, name, args in calls:
-                    result, ends = await self._shown_call(job, config, call_id, name, args)
+                if _side_by_side(calls):
+                    done = await asyncio.gather(*(self._shown_call(job, config, *c) for c in calls))
+                else:
+                    done = [await self._shown_call(job, config, *c) for c in calls]
+                for (call_id, _, _), (result, ends) in zip(calls, done, strict=True):
                     messages.append({"role": "tool", "tool_call_id": call_id, "content": result})
                     ended = ended or ends
                 path.write_text(json.dumps(messages, ensure_ascii=False), encoding="utf-8")
@@ -720,6 +737,11 @@ class AgentExecutor:
                 calls = tool_calls(message)
                 if not calls:
                     return (message.get("content") or "").strip() or "（没有交回结果）"
+                if _side_by_side(calls) and all(name in allowed for _, name, _ in calls):
+                    done = await asyncio.gather(*(self._shown_call(sub, config, *c) for c in calls))
+                    for (call_id, _, _), (result, _) in zip(calls, done, strict=True):
+                        messages.append({"role": "tool", "tool_call_id": call_id, "content": result})
+                    continue
                 for call_id, name, args in calls:
                     if name == "finish":
                         return str(args.get("summary") or "（没有写结果）")

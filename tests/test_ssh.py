@@ -1,6 +1,7 @@
 """The SSH servers page's backend: the list, the ssh_config it writes, connection tests, and who may use it."""
 
 import asyncio
+import json
 import subprocess
 import sys
 
@@ -319,3 +320,44 @@ def test_the_dispatcher_hands_a_job_on_one_server_to_the_coding_agent_there(tmp_
     shown = [s for s in steps if s["name"] == "remote_agent"]
     assert [s["status"] for s in shown] == ["done"] and shown[0]["input"] == "crm  $ Claude Code：查 crm 为什么慢"
     assert any(s["name"] == "shell" for s in steps)  # its own steps show too
+
+
+def test_a_step_asking_two_servers_at_once_runs_them_side_by_side(tmp_path):
+    import time
+
+    from test_agent import ScriptedModel, StreamingModel, agent_runtime, call
+    from test_runtime import drive
+
+    from continuum.runtime.ssh import Host
+
+    stand_in = tmp_path / "fake-ssh"
+    stand_in.write_text(f"#!{sys.executable}\nimport sys, time\ntime.sleep(1)\n"
+                        "print(sys.argv[-2].removeprefix('continuum-') + ': ' + sys.argv[-1])\n")
+    stand_in.chmod(0o755)
+    both = {"role": "assistant", "content": "", "tool_calls": [
+        {"id": f"c{i}", "type": "function", "function": {"name": "ssh", "arguments": json.dumps(
+            {"host": h, "command": "uptime", "reason": "看负载"})}} for i, h in enumerate(("a", "b"))]}
+    router = ScriptedModel(call("decide", decision="accept", title="看负载", scope="看", acknowledgement="好。", reason="r"))
+    worker = StreamingModel(both, lambda messages: call("report", state="ready", summary=" | ".join(
+        m["content"].splitlines()[-1] for m in messages[-2:])))
+
+    async def main():
+        rt = agent_runtime(tmp_path / "home", router, worker, sources={"app": {"kind": "app"}},
+                           policy={"sources": {"app": {"allowed": [{"id": "me"}]}}})
+        rt.settings.ssh.admins = ["me"]
+        rt.settings.ssh.ssh_command = str(stand_in)
+        for name in ("a", "b"):
+            rt.ssh.put(Host(name=name, address=f"34.1.2.{len(name) + ord(name) % 9}", user="u", approval="auto"))
+        ctx = rt.sources["app"]
+        try:
+            rt.start()
+            ctx.kind.post(ctx, "me", "main", "两台的负载")
+            started = time.monotonic()
+            await drive(rt, lambda: any(r["role"] == "reply" for r in ctx.kind.history(ctx, "me", "main")), timeout=15)
+            return time.monotonic() - started, ctx.kind.history(ctx, "me", "main")[-1]["text"]
+        finally:
+            await rt.close()
+
+    took, said = asyncio.run(main())
+    assert said == "a: uptime | b: uptime"  # results in the order asked
+    assert took < 1.8, took  # one second each, at once
