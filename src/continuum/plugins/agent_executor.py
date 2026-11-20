@@ -255,8 +255,10 @@ INTEGRATION_TOOLS = {
         tool("email_send", "用人的邮箱发一封邮件（纯文本）。只在请求明确要你发的时候发。",
              {"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"},
               "cc": {"type": "string"}}, required=["to", "subject", "body"])],
-    "slack": [tool("slack", "调用 Slack Web API（用人连接的机器人）：method 是方法名，params 是参数，比如 "
-                   "conversations.list、conversations.history {channel}、chat.postMessage {channel, text}。",
+    "slack": [tool("slack", "调用 Slack Web API（用人连接的令牌：用户令牌能读他看得到的所有频道和私信、能搜索；机器人令牌只能读"
+                   "它被邀请进的频道）：method 是方法名，params 是参数，比如 conversations.list {types: \"public_channel,"
+                   "private_channel,im,mpim\"}、conversations.history {channel, limit}、conversations.replies {channel, ts}、"
+                   "search.messages {query}、users.info {user}、chat.postMessage {channel, text}（发消息只在人明确要求时）。",
                    {"method": {"type": "string"}, "params": {"type": "object"}}, required=["method"])],
     "google": [
         tool("gcloud", "用人连接的 Google 服务账号执行一条 gcloud 命令；args 是 gcloud 后面的部分，比如 "
