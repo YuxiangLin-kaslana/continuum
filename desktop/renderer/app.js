@@ -856,10 +856,11 @@
 
   // In the main conversation a project's work is one line: the dispatcher handed it to a project, which does it and
   // comes back with the result. Its steps are on the project's page; a command waiting for the person shows here.
-  // Work that is over leaves no line: its answer is in the conversation, its steps on the projects tab.
+  // Only work that waits for the person shows here (a command to approve): work under way or over leaves no line,
+  // its answer comes into the conversation and its steps are on the projects tab.
   function projectLine(ticket, steps, thinking) {
     const { asking, running, label } = workState(steps, thinking);
-    if (!running && !asking) return null;
+    if (!asking) return null;
     const project = (steps.find((s) => s.project) || {}).project || ticket;
     const item = el('li', `work compact${running ? ' running' : ''}`);
     item.dataset.ticket = ticket;
@@ -955,7 +956,8 @@
     // A ticket thinking with no step of its own after its last message yet gets a box of its own at the end.
     for (const ticket of thinkingHere) {
       if (!nodes.some((n) => n.classList.contains('running') && n.dataset.ticket === ticket)) {
-        nodes.push((box === $('messages') ? projectLine : workBox)(ticket, [], true));
+        const drawnLine = (box === $('messages') ? projectLine : workBox)(ticket, [], true);
+        if (drawnLine) nodes.push(drawnLine);
       }
     }
     for (const [ticket, live] of state.streams) {

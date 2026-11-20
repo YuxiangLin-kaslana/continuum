@@ -137,7 +137,12 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         page.evaluate("window.__fake.hold = true")
         page.fill("#input", "顺便核一下交期")
         page.press("#input", "Enter")
-        page.wait_for_selector("#messages .work.compact.running >> text=正在运行命令…")
+        # Work under way shows no line in the conversation; its answer comes in as it is written.
+        for _ in range(100):
+            if page.evaluate("() => window.__fake.steps.some((s) => s.status === 'running')"):
+                break
+            page.wait_for_timeout(30)
+        assert page.locator("#messages .work").count() == 0
         page.evaluate("window.__fake.release()")
         try:
             page.wait_for_selector(".msg.streaming")
@@ -536,11 +541,10 @@ def test_the_workers_page_counts_what_runs_and_what_ran():
             step('d1', 'shell', 'python3 leadtimes.py a', 'running', '1·供应商甲');
             step('d22', 'shell', 'python3 leadtimes.py b', 'done', '2·供应商乙');
         }""")
-        page.wait_for_selector("#messages .work.compact.running >> text=2 个 Worker 正在同时干活…")
-        assert page.locator("#messages .step-worker").count() == 0
-        if SHOTS:
-            page.screenshot(path=f"{SHOTS}/desktop-compact.png")
-        page.locator("#messages .work.compact.running").get_by_role("button", name="查看过程").click()
+        # Nothing of it in the conversation; the project's own page shows its workers.
+        page.wait_for_timeout(200)
+        assert page.locator("#messages .work, #messages .step-worker").count() == 0
+        page.click("#tab-projects")  # still on the project opened from the workers page
         page.wait_for_selector("#project-messages .work.running .step-worker")
         assert page.locator("#project-messages .work.running .step-worker").all_inner_texts() == ["1·供应商甲", "2·供应商乙"]
         assert "派出 Worker" in page.inner_text("#project-messages .work.running .step.dispatch")
