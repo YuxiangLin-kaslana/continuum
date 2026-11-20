@@ -7,11 +7,13 @@ asking the model. The router only routes: it never plans the work, which is the 
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import re
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from continuum.core.errors import UserError
 from continuum.core.model import Ticket
@@ -75,6 +77,10 @@ ASSESS_TOOL = tool("assess", "对主动候选的判断。", {
 
 class ModelRouterConfig(BaseModel):
     model: str = "default"
+    # "claude": Claude Code (`claude -p`, signed in on this host) decides, the chat model above when it cannot.
+    engine: Literal["model", "claude"] = "model"
+    claude_model: str | None = None
+    claude_timeout: float = Field(default=40, gt=0, le=300)
     # Routing is a quick judgement: no long thinking by default.
     extra: dict[str, Any] = {"thinking": {"type": "disabled"}}
     instructions: str = ""
@@ -103,6 +109,45 @@ def _card(candidate: Candidate, projects: list[dict[str, Any]] | None = None,
     return "\n".join(lines)
 
 
+async def _claude_decide(system: str, card: str, config: ModelRouterConfig) -> dict[str, Any] | None:
+    """The decision as Claude Code makes it: one `claude -p` with no tools, its answer held to the decide schema.
+    None when it cannot (not installed, signed out, out of quota, too slow): the chat model decides instead."""
+    from .cli_agents import resolve
+    from .sandbox import host_env
+
+    found = resolve("claude")
+    if found is None:
+        return None
+    argv = [found, "-p", card, "--system-prompt", system, "--tools", "", "--output-format", "json",
+            "--json-schema", json.dumps(DECIDE["function"]["parameters"], ensure_ascii=False),
+            "--no-session-persistence", "--max-turns", "3"]
+    if config.claude_model:
+        argv += ["--model", config.claude_model]
+    try:
+        process = await asyncio.create_subprocess_exec(*argv, env=host_env(), stdin=asyncio.subprocess.DEVNULL,
+                                                       stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                                                       start_new_session=True)
+    except OSError:
+        return None
+    try:
+        out, _ = await asyncio.wait_for(process.communicate(), timeout=config.claude_timeout)
+    except TimeoutError:
+        process.kill()
+        await process.wait()
+        log.warning("router: claude took over %.0fs; the chat model decides", config.claude_timeout)
+        return None
+    try:
+        answer = json.loads(out.decode("utf-8", "replace").strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
+    decided = answer.get("structured_output") if isinstance(answer, dict) else None
+    if answer.get("is_error") or not isinstance(decided, dict) or decided.get("decision") not in ("accept", "ignore",
+                                                                                                  "forward"):
+        log.warning("router: claude gave no decision (%s); the chat model decides", str(answer.get("result"))[:120])
+        return None
+    return decided
+
+
 def _slug(name: str | None) -> str | None:
     if not name:
         return None
@@ -127,14 +172,17 @@ class ModelRouter:
         recent = self._recent(ctx, candidate) if self._conversational(candidate) else []
         system = ROUTER + (FORWARDING if projects else "") + (
             f"\n团队的要求：\n{config.instructions}" if config.instructions else "")
-        message = await model.complete(
-            [{"role": "system", "content": system}, {"role": "user", "content": _card(candidate, projects, recent)}],
-            tools=[DECIDE], tool_choice={"type": "function", "function": {"name": "decide"}}, **config.extra)
-        calls = tool_calls(message)
-        if not calls:
-            log.warning("router: no decision for %s", candidate.eval_id)
-            return None
-        args = calls[0][2]
+        card = _card(candidate, projects, recent)
+        args = await _claude_decide(system, card, config) if config.engine == "claude" else None
+        if args is None:
+            message = await model.complete(
+                [{"role": "system", "content": system}, {"role": "user", "content": card}],
+                tools=[DECIDE], tool_choice={"type": "function", "function": {"name": "decide"}}, **config.extra)
+            calls = tool_calls(message)
+            if not calls:
+                log.warning("router: no decision for %s", candidate.eval_id)
+                return None
+            args = calls[0][2]
         reason = str(args.get("reason") or "")
         if args.get("decision") == "forward" and projects:
             target = str(args.get("project") or "")

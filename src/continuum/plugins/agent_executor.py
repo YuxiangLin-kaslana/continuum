@@ -19,7 +19,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -31,7 +31,7 @@ from continuum.runtime import ssh as ssh_rules
 from continuum.runtime.files import MAX_FILE
 from continuum.runtime.projects import zone
 
-from . import cli_agents, media, sandbox
+from . import cli_agents, mcp_bridge, media, sandbox
 from .cli_agents import ClaudeCodeConfig, CodexConfig
 from .sandbox import SandboxConfig
 
@@ -327,6 +327,15 @@ class AgentConfig(BaseModel):
     instructions: str = ""
     # Merged into each model request, such as {"reasoning_effort": "low"}.
     extra: dict[str, Any] = {}
+    # Who thinks: "deepseek" (the chat model above, step by step) or "claude" (Claude Code, `claude -p`, signed in on
+    # this host, working its own loop with Continuum's tools lent to it; DeepSeek takes any turn it cannot).
+    brain: Literal["deepseek", "claude"] = "deepseek"
+    brain_model: str | None = None
+    # Claude Code processes at once (each holds a few hundred MB): a lead waits for a place, a sub-worker that finds
+    # none works with DeepSeek.
+    brain_parallel: int = Field(default=6, ge=1, le=64)
+    brain_timeout: float = Field(default=3 * 3600, gt=0, le=12 * 3600)
+    brain_max_turns: int = Field(default=400, ge=1, le=5000)
     # Claude Code and Codex as tools, when set (an empty table takes the defaults).
     claude_code: ClaudeCodeConfig | None = None
     codex: CodexConfig | None = None
@@ -400,6 +409,59 @@ async def _wrap_up(model: Any, messages: list[dict[str, Any]], config: AgentConf
     except Exception:  # noqa: BLE001 - the person still hears that the turn stopped
         words = ""
     return words or "没来得及整理出结论。"
+
+
+def _lead_rules(job: Any, config: AgentConfig, connected: Any) -> str:
+    """Everything a lead is told beyond how its own tools work: projects, how to present, dispatching, this machine,
+    speed, where work runs, pictures, connected services, the team's words and what the person asked to remember."""
+    system = ""
+    if job.projects:
+        tz = job.projects.timezone_of(getattr(job, "requester", "")) if hasattr(job.projects, "timezone_of") else "UTC"
+        local = datetime.now(UTC).astimezone(zone(tz))
+        system += PROJECT_RULES.format(tz=tz, now=local.strftime("%Y-%m-%d %H:%M %A"))
+        system += PRESENT_RULES
+    system += LEAD_RULES.format(most=MAX_DISPATCH) if job.crew else ""
+    system += _host_rules(config, job)
+    system += EFFICIENCY_RULES
+    # Last, where it is read with the most weight: where the work runs.
+    system += _ssh_rules(job)
+    system += PERCEIVE_RULES
+    if job.integrations is not None:
+        missing = [TOOL_KINDS[k] for k in TOOL_KINDS if k not in connected]
+
+        def named(kind: str) -> str:
+            labels = [a["label"] for a in next(t for t in job.integrations.view() if t["kind"] == kind)["accounts"]]
+            return f"{TOOL_KINDS[kind]}（账号：{'、'.join(labels)}）" if len(labels) > 1 else TOOL_KINDS[kind]
+
+        system += INTEGRATION_RULES.format(connected="、".join(named(k) for k in connected) or "无",
+                                           missing="、".join(missing) or "无")
+    system += f"\n团队的要求：\n{config.instructions}\n" if config.instructions else ""
+    system += job.memories.brief(job.requester) if getattr(job, "memories", None) is not None else ""
+    return system
+
+
+# What Claude Code is told on top of the rules a lead or sub-worker has: its own tools do the local work, Continuum's
+# come through MCP.
+BRAIN_RULES = """
+【你的工具】你是 Claude Code：本机的命令、读写文件用你自己的 Bash / Read / Write / Edit / Glob / Grep。
+下面规则里提到的 Continuum 工具，在你这里的名字是 mcp__continuum__<名字>：ssh_hosts、ssh_profile、ssh、remote_agent、
+dispatch、show_file、perceive、remember、forget、propose_project、request_tool，以及连接的服务（github、slack、email_*、
+gcloud、google_api、aws、cloudflare、godaddy）。连服务器、交给服务器上的助手、派子 Worker、给人发文件，都用这些工具，
+不要用 Bash 自己 ssh（那样人看不到、也批准不了）。你自己能直接看图片：图片用 Read 打开就行；视频、音频用 perceive。
+规则里说的 report / ask：做完时最后一条回复就是给人的汇报；要人拍板时最后一条回复以【问题】开头。
+"""
+# Claude's own tools: the local work it does itself rather than through Continuum.
+CLAUDE_OWN = {"shell", "read_file", "write_file", "list_files", "claude_code", "report", "ask", "ack", "handback", "finish"}
+CLAUDE_BUILTINS = ["Bash", "Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite",
+                   "mcp__continuum"]
+_claude_places: asyncio.Semaphore | None = None
+
+
+def _places(config: AgentConfig) -> asyncio.Semaphore:
+    global _claude_places
+    if _claude_places is None:
+        _claude_places = asyncio.Semaphore(config.brain_parallel)
+    return _claude_places
 
 
 def _ssh_rules(job: Any) -> str:
@@ -602,6 +664,7 @@ class AgentExecutor:
         job.memories = getattr(ctx, "memories", None) if getattr(job, "requester", None) else None
         job.model = model
         job.integrations, connected = _integrations_for(ctx, job)
+        job.brain_config = config
 
         def offered() -> list[dict[str, Any]]:
             # Asked again at every step: a tool the person connects during the turn can be used at once.
@@ -612,34 +675,24 @@ class AgentExecutor:
                     *([DISPATCH] if job.crew else []),
                     *(t for kind in now_connected for t in INTEGRATION_TOOLS[kind]),
                     *([REQUEST_TOOL] if job.integrations is not None and job.projects is not None else [])]
+        carried: list[str] = []
+        if config.brain == "claude":
+            items = [_describe(item) for item in await job.inputs()]
+            why = await self._claude_turn(job, config, offered, connected, items)
+            if why is None:
+                return
+            # Claude could not do this turn: DeepSeek takes it, with what came in.
+            log.warning("claude turn for %s fell back to DeepSeek: %s", job.ticket_id[:8], why)
+            carried = [*items, f"【系统】这一轮本该由 Claude 来做，但它没能完成（{why[:200]}），改由你接手。"]
         if not messages:
             system = SYSTEM + (DELEGATING.format(names="、".join(delegates)) if delegates else "")
-            if job.projects:
-                tz = job.projects.timezone_of(getattr(job, "requester", "")) if hasattr(job.projects, "timezone_of") \
-                    else "UTC"
-                local = datetime.now(UTC).astimezone(zone(tz))
-                system += PROJECT_RULES.format(tz=tz, now=local.strftime("%Y-%m-%d %H:%M %A"))
-                system += PRESENT_RULES
-            system += LEAD_RULES.format(most=MAX_DISPATCH) if job.crew else ""
-            system += _host_rules(config, job)
-            system += EFFICIENCY_RULES
-            # Last, where it is read with the most weight: where the work runs.
-            system += _ssh_rules(job)
-            system += PERCEIVE_RULES
-            if job.integrations is not None:
-                missing = [TOOL_KINDS[k] for k in TOOL_KINDS if k not in connected]
-                def named(kind: str) -> str:
-                    labels = [a["label"] for a in next(t for t in job.integrations.view() if t["kind"] == kind)["accounts"]]
-                    return f"{TOOL_KINDS[kind]}（账号：{'、'.join(labels)}）" if len(labels) > 1 else TOOL_KINDS[kind]
-
-                system += INTEGRATION_RULES.format(connected="、".join(named(k) for k in connected) or "无",
-                                                   missing="、".join(missing) or "无")
-            system += f"\n团队的要求：\n{config.instructions}\n" if config.instructions else ""
-            system += job.memories.brief(job.requester) if job.memories is not None else ""
+            system += _lead_rules(job, config, connected)
             messages = [{"role": "system", "content": system}, {"role": "user", "content": job.assignment}]
         job.workdir.mkdir(parents=True, exist_ok=True)
 
         async def take_inputs() -> None:
+            while carried:
+                messages.append({"role": "user", "content": carried.pop(0)})
             for item in await job.inputs():
                 messages.append({"role": "user", "content": _describe(item)})
 
@@ -850,9 +903,12 @@ class AgentExecutor:
                  *(t for kind in INTEGRATION_TOOLS if kind in connected for t in INTEGRATION_TOOLS[kind]), FINISH]
         system = SUB_SYSTEM.format(folder=f"sub-{number}") + _ssh_rules(job) + _host_rules(config, job) + EFFICIENCY_RULES + PERCEIVE_RULES + (
             job.memories.brief(job.requester) if getattr(job, "memories", None) is not None else "")
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": f"项目背景：\n{job.assignment}\n\n你的子任务（{label}）：\n{task}"}]
+        brief = f"项目背景：\n{job.assignment}\n\n你的子任务（{label}）：\n{task}"
+        if config.brain == "claude":
+            answer = await self._claude_sub(sub, config, tools, system, brief)
+            if answer is not None:
+                return answer
+        messages: list[dict[str, Any]] = [{"role": "system", "content": system}, {"role": "user", "content": brief}]
         allowed = {t["function"]["name"] for t in tools}
         try:
             for _ in range(config.max_steps):
@@ -968,6 +1024,82 @@ class AgentExecutor:
             return base64.b64decode(last, validate=True)
         except (binascii.Error, ValueError):
             raise ValueError("取回的内容不完整") from None
+
+    async def _claude_run(self, job, config: AgentConfig, lent: list[dict[str, Any]], prompt: str, rules: str,
+                          session: str | None, live: bool) -> Any:
+        """One run of Claude Code on this host with Continuum's tools lent to it for the run."""
+        names = {t["function"]["name"] for t in lent}
+
+        async def handle(name: str, args: dict[str, Any]) -> str:
+            if name not in names:
+                return f"错误：这里不能用 {name}"
+            result, _ = await self._shown_call(job, config, f"mcp-{uuid.uuid4().hex[:8]}", name, args)
+            return result
+
+        bridge = await mcp_bridge.bridge()
+        token = bridge.open(handle)
+        tools_file = job.workdir.with_name(f"{job.workdir.name}.mcp-{token[:8]}.json")
+        job.workdir.mkdir(parents=True, exist_ok=True)
+        tools_file.write_text(json.dumps(mcp_bridge.as_mcp(lent), ensure_ascii=False), encoding="utf-8")
+        claude = ClaudeCodeConfig(
+            full_access=True, model=config.brain_model, max_turns=config.brain_max_turns,
+            timeout_seconds=config.brain_timeout, allowed_tools=CLAUDE_BUILTINS,
+            extra_args=["--mcp-config", json.dumps(mcp_bridge.mcp_config(bridge.path, token, tools_file))],
+            # A call may take long (a sub-worker, a render): Claude Code waits for it.
+            env={"MCP_TOOL_TIMEOUT": str(int(config.brain_timeout * 1000)), "MCP_TIMEOUT": "60000"})
+        try:
+            return await cli_agents.DELEGATES["claude_code"].run(claude, job, prompt, session, rules, live=live)
+        finally:
+            bridge.close(token)
+            tools_file.unlink(missing_ok=True)
+
+    async def _claude_turn(self, job, config: AgentConfig, offered: Any, connected: Any, items: list[str]) -> str | None:
+        """A lead's turn worked by Claude Code. None when done; else why not (DeepSeek takes the turn)."""
+        if cli_agents.resolve("claude") is None:
+            return "这台机器上没有 claude"
+        path = job.state_file(".brain.json") if hasattr(job, "state_file") else job.workdir.with_name(
+            job.workdir.name + ".brain.json")
+        saved = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        session = saved.get("session")
+        prompt = "\n\n".join([job.assignment, *items]) if session is None else ("\n\n".join(items) or "【系统】继续。")
+        rules = cli_agents.RULES + BRAIN_RULES + _lead_rules(job, config, connected)
+        lent = [t for t in offered() if t["function"]["name"] not in CLAUDE_OWN]
+        async with _places(config):
+            try:
+                run = await self._claude_run(job, config, lent, prompt, rules, session, live=True)
+            finally:
+                job.activity({"type": "idle"})
+        if run.session:
+            path.write_text(json.dumps({"session": run.session}), encoding="utf-8")
+        if run.error and not run.answer:
+            return run.error
+        if not run.answer:
+            return None  # nothing said: the host reports the turn as waiting
+        state, words = cli_agents.parse_answer(run.answer)
+        if state == "ask":
+            job.report("progress", "等待回答", question=words)
+        elif state == "blocked":
+            job.report("blocked", words, question=f"卡住了：{words}")
+        elif state == "failed":
+            job.report("failed", words, question=f"没做成：{words}。回复一句可以让我再试。")
+        else:
+            job.report(state, words)
+        return None
+
+    async def _claude_sub(self, sub, config: AgentConfig, tools: list[dict[str, Any]], system: str,
+                          brief: str) -> str | None:
+        """A sub-worker's task worked by Claude Code, when a place is free; None to let DeepSeek do it."""
+        places = _places(config)
+        if places.locked() or cli_agents.resolve("claude") is None:
+            return None
+        lent = [t for t in tools if t["function"]["name"] not in CLAUDE_OWN]
+        async with places:
+            run = await self._claude_run(sub, config, lent, brief, system + BRAIN_RULES.replace(
+                "规则里说的 report / ask：做完时最后一条回复就是给人的汇报；要人拍板时最后一条回复以【问题】开头。",
+                "做完时最后一条回复就是交回负责人的结果（具体的数字、路径、结论）；做不成也如实写原因。"), None, live=False)
+        if run.error and not run.answer:
+            return None
+        return run.answer or "（没有交回结果）"
 
     async def _remote_agent(self, job, config: AgentConfig, key: str, args: dict[str, Any]) -> str:
         """A job on one server, handed to the coding agent there: after the person's approval if the server needs it."""

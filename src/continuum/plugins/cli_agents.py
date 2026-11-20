@@ -259,6 +259,8 @@ class _ClaudeReader:
                     name = str(block.get("name", ""))
                     key = str(block.get("id") or uuid.uuid4().hex)
                     self.names[key] = name
+                    if name.startswith("mcp__continuum__"):
+                        continue  # Continuum's own tool: its run shows its own step
                     args = block.get("input") or {}
                     run.step(key, CLAUDE_STEPS.get(name, name.lower()), _claude_input(name, args, self.workdir), "running")
         elif kind == "user":
