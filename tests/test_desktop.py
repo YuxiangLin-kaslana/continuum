@@ -405,7 +405,12 @@ def test_nothing_in_a_conversation_scrolls_sideways_and_markdown_renders(width):
         page.click("#tab-projects")
         page.locator(".card.project[data-project=t-9]").get_by_role("button", name="打开").click()
         page.wait_for_selector("#project-messages .msg.reply.rich table")
-        page.evaluate("document.querySelectorAll('#project-messages details').forEach((d) => { d.open = true; })")
+        # A redraw that lands just then folds them again (the page remembers each one's last state): open until shown.
+        for _ in range(50):
+            page.evaluate("document.querySelectorAll('#project-messages details').forEach((d) => { d.open = true; })")
+            if page.locator(".step-command").first.is_visible():
+                break
+            page.wait_for_timeout(100)
         page.wait_for_selector(".step-command")
         assert page.locator(".step-command").count() == 2
 
@@ -565,6 +570,13 @@ def test_searching_the_conversation_finds_and_goes_to_a_message():
         page.click("#connect")
         page.wait_for_selector("#main:not([hidden])")
 
+        # Folded away until wanted: a small button, or Ctrl+F.
+        assert page.is_hidden("#search") and page.is_visible("#search-open")
+        page.keyboard.press("Control+f")
+        assert page.is_visible("#search") and page.evaluate("document.activeElement.id") == "search"
+        page.press("#search", "Escape")
+        assert page.is_hidden("#search")
+        page.click("#search-open")
         page.fill("#search", "报价")
         page.wait_for_selector("#search-results:not([hidden]) .search-hit")
         hits = page.locator(".search-hit")
@@ -588,7 +600,7 @@ def test_searching_the_conversation_finds_and_goes_to_a_message():
         page.wait_for_selector(".search-none")
         assert page.inner_text(".search-none") == "没有找到「没有这句话」"
         page.press("#search", "Escape")
-        assert page.input_value("#search") == "" and page.is_hidden("#search-results")
+        assert page.input_value("#search") == "" and page.is_hidden("#search-results") and page.is_hidden("#search")
         assert errors == []
         browser.close()
 

@@ -1174,9 +1174,39 @@
     clearTimeout(searchTimer);
     searchTimer = setTimeout(runSearch, 250);
   });
+  // The search stays a small button until wanted: it opens on a click or Ctrl+F, and folds away again when it is
+  // emptied with Esc or left empty.
+  function openSearch() {
+    if (state.view !== 'chat') setView('chat');
+    $('chat-tools').classList.remove('collapsed');
+    $('search-open').setAttribute('aria-pressed', 'true');
+    $('search').focus();
+  }
+  function closeSearch() {
+    $('search').value = '';
+    $('search-results').hidden = true;
+    $('chat-tools').classList.add('collapsed');
+    $('search-open').setAttribute('aria-pressed', 'false');
+  }
+  $('search-open').addEventListener('click', () => {
+    if ($('chat-tools').classList.contains('collapsed') || state.view !== 'chat') openSearch();
+    else closeSearch();
+  });
+  document.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && state.view === 'chat' && !$('main').hidden) {
+      event.preventDefault();
+      openSearch();
+    }
+  });
+  $('search').addEventListener('blur', () => {
+    // A click on a result lands before this; only an empty box folds away.
+    setTimeout(() => {
+      if (!$('search').value.trim() && document.activeElement !== $('search')) closeSearch();
+    }, 150);
+  });
   $('search').addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
-      $('search').value = '';
+      closeSearch();
       runSearch();
     } else if (event.key === 'Enter') {
       clearTimeout(searchTimer);
