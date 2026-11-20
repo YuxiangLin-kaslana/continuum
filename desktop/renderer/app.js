@@ -96,10 +96,16 @@
     return node;
   }
 
+  // Something new slides in once. The class goes when the slide is done, and is never on something shown before:
+  // a node kept across redraws (an answer with a chart in it) is put back on the page at every redraw, and a class
+  // still on it would play the slide each time (seen live: answers flickering while other work went on).
   function arrival(node, key) {
     if (!state.shown.has(key)) {
       state.shown.add(key);
       node.classList.add('arrived');
+      node.addEventListener('animationend', () => node.classList.remove('arrived'), { once: true });
+    } else {
+      node.classList.remove('arrived');
     }
     return node;
   }

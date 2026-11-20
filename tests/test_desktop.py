@@ -716,6 +716,14 @@ def test_answers_draw_code_formulas_diagrams_charts_and_the_files_the_assistant_
         page.evaluate("window.__fake.say('t-4', 'reply', '好的', 't-4')")
         page.wait_for_selector(".msg.reply >> text=好的")
         assert drawn and page.evaluate("document.querySelector('.chart canvas') === window.__keep")
+        # Kept, it does not slide in again at each redraw (seen live: it flickered while other work went on).
+        for _ in range(3):
+            page.evaluate("window.__fake.fire('event', { type: 'step', step: { ticket_id: 't-2', key: 'k' + Math.random(),"
+                          " name: 'shell', input: 'ls', output: '', status: 'running', at: new Date().toISOString() } })")
+            page.wait_for_timeout(50)
+        assert "arrived" not in answer.get_attribute("class").split()
+        assert page.evaluate("document.getAnimations().filter(a => a.effect && a.effect.target"
+                             " && a.effect.target.matches('.msg.reply')).length") == 0
         if SHOTS:
             answer.screenshot(path=f"{SHOTS}/desktop-rich-answer.png")
             files.screenshot(path=f"{SHOTS}/desktop-rich-files.png")
