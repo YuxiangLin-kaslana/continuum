@@ -629,7 +629,7 @@
         bubble.append(caption);
         Rich.enhance(caption);
       }
-      for (const file of (m.meta && m.meta.files) || []) bubble.append(Rich.fileCard(file, call, showStatus));
+      for (const file of (m.meta && m.meta.files) || []) bubble.append(Rich.fileCard(file, call, showStatus, markdown));
     } else if (m.role === 'reminder') {
       bubble.append(icon('bell'), el('span', '', m.text));
     } else if (m.role === 'scheduled') {
@@ -642,7 +642,7 @@
     if (sent && sent.length) {
       item.classList.add('with-files');
       const box = el('div', 'sent-files');
-      for (const file of sent) box.append(Rich.fileCard(file, call, showStatus));
+      for (const file of sent) box.append(Rich.fileCard(file, call, showStatus, markdown));
       if (!m.text) bubble.hidden = true;
       item.append(face, bubble, box);
     }

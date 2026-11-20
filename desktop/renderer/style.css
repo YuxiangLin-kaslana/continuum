@@ -614,3 +614,8 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 .preview-body pre { margin: 0; }
 .preview-doc h4 { margin: 18px 0 6px; color: var(--ink); }
 .preview-doc table { margin: 8px 0 12px; }
+/* A document stays a card; its name opens the preview. */
+.file-card .file-head.opens { cursor: pointer; }
+.file-card .file-head.opens:hover .file-name { color: var(--teal); }
+.file-card.readable .file-body { display: none; }
+.outline.amber-text { color: var(--amber); border-color: var(--amber-line); }

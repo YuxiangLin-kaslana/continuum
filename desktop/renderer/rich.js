@@ -214,7 +214,9 @@
     return rows;
   }
 
-  function fileCard(file, call, onError) {
+  // A file in the conversation: pictures, video and sound show where they are; a document, a table or code stays a
+  // card, and opens in a preview (laid out) when asked, so a long text does not fill the conversation.
+  function fileCard(file, call, onError, markdown) {
     const box = el('div', 'file-card');
     box.dataset.file = file.id;
     const mime = file.mime || '';
@@ -232,13 +234,27 @@
       });
       actions.append(b);
     };
-    act('打开', 'openFile');
+    const readable = !/^(image|video|audio)\//.test(mime) && (TEXT.test(mime) || CODE_EXT.test(file.name)
+      || /\.(csv|tsv|md|markdown)$/i.test(file.name));
+    const look = () => preview({ name: file.name, load: () => call('file', file.id), markdown: markdown || plainText,
+      open: () => call('openFile', file.id, file.name), save: () => call('saveFile', file.id, file.name), onError });
+    if (readable) {
+      const b = el('button', 'outline small amber-text', '预览');
+      b.addEventListener('click', (event) => { event.stopPropagation(); look(); });
+      actions.append(b);
+      head.classList.add('opens');
+      head.addEventListener('click', look);
+      box.classList.add('readable');
+    }
+    // A readable file opens with the system's app from its preview; the card keeps room for its name.
+    if (!readable) act('打开', 'openFile');
     act('另存为', 'saveFile');
+    head.title = file.name;
     head.append(actions);
     box.append(head);
     const body = el('div', 'file-body');
     const show = async () => {
-      const { url, blob } = await fileData(call, file.id);
+      const { url } = await fileData(call, file.id);
       if (mime.startsWith('image/')) {
         const img = el('img', 'file-image');
         img.alt = file.name;
@@ -256,37 +272,14 @@
         audio.controls = true;
         audio.src = url;
         body.replaceChildren(audio);
-      } else if (mime.startsWith('text/csv') || /\.(csv|tsv)$/i.test(file.name)) {
-        const rows = csvRows(await blob.text(), 41);
-        const table = el('table');
-        rows.forEach((cells, i) => {
-          const tr = el('tr');
-          for (const c of cells) tr.append(el(i ? 'td' : 'th', '', c));
-          table.append(tr);
-        });
-        const wrap = el('div', 'file-table');
-        wrap.append(table);
-        body.replaceChildren(wrap);
-        if (rows.length > 40) body.append(el('div', 'file-more', '只显示前 40 行，完整内容点“打开”'));
-      } else if (TEXT.test(mime) || CODE_EXT.test(file.name)) {
-        const text = await blob.text();
-        const lines = text.split('\n');
-        const pre = el('pre');
-        const code = el('code', '', lines.slice(0, 300).join('\n'));
-        const ext = (file.name.split('.').pop() || '').toLowerCase();
-        code.dataset.lang = LANGS[ext] || ext;
-        pre.append(code);
-        body.replaceChildren(pre);
-        highlight(body);
-        if (lines.length > 300) body.append(el('div', 'file-more', `共 ${lines.length} 行，只显示前 300 行`));
       } else {
         box.classList.add('plain');
         return;
       }
       box.classList.add('previewed');
     };
-    // Something to look at is fetched at once; the rest waits for "打开".
-    if (/^(image|video|audio)\//.test(mime) || TEXT.test(mime) || CODE_EXT.test(file.name) || /\.(csv|tsv)$/i.test(file.name)) {
+    // Pictures, video and sound are fetched at once; anything else waits to be previewed or opened.
+    if (/^(image|video|audio)\//.test(mime)) {
       body.append(el('div', 'file-loading', '加载中…'));
       show().catch((error) => body.replaceChildren(el('div', 'rich-error', `没能取回：${error.message}`)));
     } else {
@@ -372,6 +365,13 @@
       body.replaceChildren(el('div', 'rich-error', `打不开：${error.message}`));
     }
     return shade;
+  }
+
+  // Without a Markdown reader, a document shows as its text.
+  function plainText(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return { html: `<pre>${div.innerHTML}</pre>` };
   }
 
   window.Rich = { enhance, fileCard, lightbox, preview };

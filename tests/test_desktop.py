@@ -698,8 +698,13 @@ def test_answers_draw_code_formulas_diagrams_charts_and_the_files_the_assistant_
         assert files.locator(".caption strong").inner_text() == "本周"
         files.locator(".file-card[data-file=f1] img.file-image").wait_for()
         assert page.evaluate("document.querySelector('.file-image').naturalWidth") == 1
-        files.locator(".file-card[data-file=f2] table").wait_for()
-        assert files.locator(".file-card[data-file=f2] td").all_inner_texts() == ["R12", "40", "C3", "1,200"]
+        # A table or a document stays a card in the conversation; its preview lays it out.
+        assert files.locator(".file-card[data-file=f2] table").count() == 0
+        files.locator(".file-card[data-file=f2] >> text=预览").click()
+        page.wait_for_selector(".preview table")
+        assert page.locator(".preview td").all_inner_texts() == ["R12", "40", "C3", "1,200"]
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".preview", state="detached")
         assert files.locator(".file-card[data-file=f3]").get_attribute("class").split() == ["file-card", "plain"]
         files.locator(".file-card[data-file=f3] >> text=打开").click()
         files.locator(".file-card[data-file=f3] >> text=另存为").click()
@@ -824,6 +829,21 @@ def test_the_person_sends_pictures_and_recordings_chosen_dropped_or_pasted():
         sent.locator(".file-card[data-file=up1] img.file-image").wait_for()
         assert sent.locator(".file-card .file-name").all_inner_texts() == ["shot.png", "memo.mp3"]
         assert "看看这张截图和录音" in sent.inner_text()
+        # A document the person sent stays a card too, and opens laid out.
+        page.evaluate("""() => {
+            const text = '# PP ERP 评审会需求清单\\n\\n| 难度 | 含义 |\\n|---|---|\\n| 低 | 单个页面 |\\n';
+            window.__fake.files.doc1 = { mime: 'text/markdown', data: btoa(String.fromCharCode(...new TextEncoder().encode(text))) };
+            window.__fake.say(null, 'user', '这个是清单表', null, { files: [{ id: 'doc1', name: 'PP_ERP评审会需求清单.md',
+                mime: 'text/markdown', size: 20480 }] });
+        }""")
+        card = page.locator(".msg.user.with-files .file-card[data-file=doc1]")
+        card.wait_for()
+        assert card.locator("pre, table").count() == 0
+        card.locator(".file-name").click()
+        page.wait_for_selector(".preview .preview-doc table")
+        assert page.locator(".preview .preview-doc td").all_inner_texts() == ["低", "单个页面"]
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".preview", state="detached")
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-sent.png")
         browser.close()
