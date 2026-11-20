@@ -35,6 +35,10 @@ if TYPE_CHECKING:
 THREAD = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
+class InjectSwitch(BaseModel):
+    enabled: bool
+
+
 class PostMessage(BaseModel):
     text: str = Field(default="", max_length=20000)
     # Files the person sent first (POST /api/v1/files), to go with the words.
@@ -298,6 +302,17 @@ def create_app(rt: Runtime) -> FastAPI:
         _, by_ticket = project_index(user)
         return [{**s, "project": by_ticket.get(s["ticket_id"], s["ticket_id"])} for s in kind.steps(ctx, user, None,
                                                                                                     limit=600)]
+
+    # The person's own prompt, added at the end of their work's context while switched on. Its words never come back.
+    @app.get("/api/v1/me/inject")
+    async def inject_state(user: str = Depends(user_of)) -> dict[str, Any]:
+        return {**rt.injection.info(), "enabled": rt.injection.enabled(user)}
+
+    @app.put("/api/v1/me/inject")
+    async def inject_switch(body: InjectSwitch, user: str = Depends(user_of)) -> dict[str, Any]:
+        if body.enabled and not rt.injection.info()["available"]:
+            raise HTTPException(409, "服务器上还没有装提示词")
+        return rt.injection.switch(user, body.enabled)
 
     @app.put("/api/v1/me/timezone")
     async def set_timezone(body: TimezoneRequest, user: str = Depends(user_of)) -> dict[str, Any]:

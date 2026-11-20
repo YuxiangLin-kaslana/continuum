@@ -752,6 +752,14 @@ def test_the_person_sends_pictures_and_recordings_chosen_dropped_or_pasted():
         page.fill("#password", "good-password")
         page.click("#connect")
         page.wait_for_selector("#main:not([hidden])")
+        # The person's own prompt: a switch, off until they turn it on, and its words never in the page.
+        page.wait_for_selector("#inject:not([hidden])")
+        assert page.get_attribute("#inject", "aria-pressed") == "false"
+        page.click("#inject")
+        page.wait_for_selector("#inject[aria-pressed=true]")
+        assert page.evaluate("window.__fake.inject.enabled") is True and "Dsh全破.md" in page.get_attribute("#inject", "title")
+        page.click("#inject")
+        page.wait_for_selector("#inject[aria-pressed=false]")
         # Chosen with the paperclip, and one dropped on the window.
         page.set_input_files("#attach-input", files=[
             {"name": "shot.png", "mimeType": "image/png", "buffer": png},

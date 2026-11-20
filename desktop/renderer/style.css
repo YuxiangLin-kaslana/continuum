@@ -584,3 +584,10 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 #view-chat.dropping { outline: 2px dashed var(--teal-line); outline-offset: -6px; }
 .msg.user.with-files .sent-files { grid-column: 2; justify-self: end; width: min(100%, 360px); }
 .msg.user.with-files .sent-files .file-card { margin: 4px 0 0; }
+/* --- the person's own prompt: a switch beside the paperclip --- */
+.composer .inject { flex: none; height: 42px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; background: transparent; border: 1px solid var(--line-2); color: var(--dim); font: 700 11px/1 var(--sans); letter-spacing: 0.08em; cursor: pointer; }
+.composer .inject[hidden] { display: none; }
+.composer .inject .inject-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); }
+.composer .inject:hover { color: var(--soft); border-color: var(--amber-line); }
+.composer .inject[aria-pressed="true"] { color: var(--amber); border-color: var(--amber-line); background: var(--amber-bg); }
+.composer .inject[aria-pressed="true"] .inject-dot { background: var(--amber); box-shadow: 0 0 6px var(--amber); }

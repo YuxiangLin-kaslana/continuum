@@ -348,10 +348,17 @@ WRAP_UP = ("【系统】这一轮的步数用完了，不能再调用工具。�
            "产物路径），还差什么没做。不要写过程。")
 
 
-async def _wrap_up(model: Any, messages: list[dict[str, Any]], config: AgentConfig) -> str:
+def _inject(job: Any, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """What a model call sends: the conversation, and, when the person has switched it on, their prompt after
+    everything else. Only in what is sent: the conversation kept for the next call never holds it."""
+    injection = getattr(job, "injection", None)
+    return injection.add(messages, getattr(job, "requester", None)) if injection is not None else messages
+
+
+async def _wrap_up(model: Any, messages: list[dict[str, Any]], config: AgentConfig, job: Any = None) -> str:
     """The last words of a turn that ran out of steps: what it has, without any more tool calls."""
     try:
-        message = await model.complete([*messages, {"role": "user", "content": WRAP_UP}], **config.extra)
+        message = await model.complete(_inject(job, [*messages, {"role": "user", "content": WRAP_UP}]), **config.extra)
         words = (message.get("content") or "").strip()
     except Exception:  # noqa: BLE001 - the person still hears that the turn stopped
         words = ""
@@ -550,6 +557,7 @@ class AgentExecutor:
         job.ssh = _ssh_for(ctx, job)
         job.projects = getattr(ctx, "projects", None)
         job.crew = getattr(ctx, "crew", None)
+        job.injection = getattr(ctx, "injection", None)
         job.model = model
         job.integrations, connected = _integrations_for(ctx, job)
 
@@ -597,10 +605,11 @@ class AgentExecutor:
                 started = time.monotonic()
                 live = _Live(job)
                 if hasattr(model, "stream"):
-                    message = await model.stream(messages, tools=offered(), on_progress=live, **config.extra)
+                    message = await model.stream(_inject(job, messages), tools=offered(), on_progress=live,
+                                                 **config.extra)
                     live(message, final=True)
                 else:
-                    message = await model.complete(messages, tools=offered(), **config.extra)
+                    message = await model.complete(_inject(job, messages), tools=offered(), **config.extra)
                 self._show_words(job, message, time.monotonic() - started)
                 kept = {k: v for k, v in message.items() if k in ("role", "content", "tool_calls", "reasoning_content")}
                 kept["content"] = kept.get("content") or ""
@@ -627,7 +636,7 @@ class AgentExecutor:
                 await take_inputs()
             # Out of steps: what it found so far still reaches the person. (Seen live: a finished report sat in the
             # workspace, the turn ended "blocked" with no word to anyone, and the project was closed as idle.)
-            words = await _wrap_up(model, messages, config)
+            words = await _wrap_up(model, messages, config, job)
             job.report("ready", f"{words}\n\n（这一轮用完了 {config.max_steps} 步，上面是目前的结果；要接着做就回复“继续”。）")
         except ModelError as error:
             # Like any failure, it waits for the person: a reply, or a retry, lets the worker go on.
@@ -802,7 +811,7 @@ class AgentExecutor:
         try:
             for _ in range(config.max_steps):
                 started = time.monotonic()
-                message = await model.complete(messages, tools=tools, **config.extra)
+                message = await model.complete(_inject(sub, messages), tools=tools, **config.extra)
                 self._show_words(sub, message, time.monotonic() - started)
                 kept = {k: v for k, v in message.items() if k in ("role", "content", "tool_calls", "reasoning_content")}
                 kept["content"] = kept.get("content") or ""
@@ -823,7 +832,7 @@ class AgentExecutor:
                     else:
                         result, _ = await self._shown_call(sub, config, call_id, name, args)
                     messages.append({"role": "tool", "tool_call_id": call_id, "content": result})
-            words = await _wrap_up(model, messages, config)
+            words = await _wrap_up(model, messages, config, sub)
             return f"（用完了 {config.max_steps} 步，没做完）{words}"
         except ModelError as error:
             return f"模型调用失败：{error}"

@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('continuum', {
   projects: call('api:projects'),
   projectAction: call('api:projectAction'),
   setTimezone: call('api:setTimezone'),
+  inject: call('api:inject'),
+  injectSwitch: call('api:injectSwitch'),
   approve: call('api:approve'),
   ssh: call('api:ssh'),
   tools: call('api:tools'),

@@ -31,6 +31,7 @@ from continuum.policy.gate import RulePolicy
 from .accounts import Accounts
 from .crew import Crew
 from .files import Files
+from .injection import Injection
 from .integrations import NAMES, Integrations
 from .projects import Projects, project_of_thread, zone
 from .ssh import SshHosts, survey
@@ -124,6 +125,8 @@ class Runtime:
             self.integrations = Integrations(self.home)
             self.executor.context.integrations = self.integrations
             self.files = Files(self.home / "data" / "files")
+            self.injection = Injection(self.home, self.store)
+            self.executor.context.injection = self.injection
             self.router.projects = self.executor.context.projects
             self.router.bind(self.engine)
             self.executor.bind(self.engine)

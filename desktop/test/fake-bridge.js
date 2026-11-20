@@ -111,6 +111,7 @@
   // Files the assistant showed, by id: their kind and bytes (base64).
   const files = {};
   window.__fake = { fire, messages, projects, steps, hold: false, files, opened: [], uploadedNames: {},
+    inject: { available: true, name: 'Dsh全破.md', chars: 12000, enabled: false },
     release: () => { passes++; },
     gates: () => ({ passes, pauses }),
     // Something the assistant says now, as the server would send it.
@@ -301,6 +302,8 @@
       sshHosts.sort((a, b) => a.name.localeCompare(b.name));
       return ok({ ...row });
     },
+    inject: () => ok({ ...window.__fake.inject }),
+    injectSwitch: (enabled) => { window.__fake.inject.enabled = !!enabled; return ok({ ...window.__fake.inject }); },
     file: (id) => (files[id] ? ok({ ...files[id] }) : Promise.resolve({ ok: false, status: 404, error: '文件不在了' })),
     openFile: (id, name) => { window.__fake.opened.push(['open', id, name]); return ok(true); },
     saveFile: (id, name) => { window.__fake.opened.push(['save', id, name]); return ok(`C:/Users/me/${name}`); },

@@ -304,7 +304,38 @@
     // Every login asks whether a newer version is out.
     checkUpdate(false);
     if (api.workers) loadWorkers();
+    loadInject();
   }
+
+  // --- the person's own prompt on the server: a switch; while on, it goes at the end of their work's context ---
+
+  function drawInject(info) {
+    const button = $('inject');
+    button.hidden = !info || !info.available;
+    if (!info) return;
+    const on = !!info.enabled;
+    button.setAttribute('aria-pressed', String(on));
+    $('inject-name').textContent = 'DSH';
+    button.title = on ? `已开启：每次调用模型时，把「${info.name}」加在上下文最末尾（不留在之后的上下文里）。点一下关闭`
+      : `已关闭：点一下开启「${info.name}」`;
+  }
+  async function loadInject() {
+    if (!api.inject) return;
+    try { drawInject(await call('inject')); } catch (_) { drawInject(null); }
+  }
+  $('inject').addEventListener('click', async () => {
+    const button = $('inject');
+    const on = button.getAttribute('aria-pressed') !== 'true';
+    button.disabled = true;
+    try {
+      drawInject(await call('injectSwitch', on));
+      showStatus(on ? 'DSH 已开启：之后的每次模型调用都会在末尾加上它' : 'DSH 已关闭');
+    } catch (error) {
+      showStatus(`没切换成功：${error.message}`);
+    } finally {
+      button.disabled = false;
+    }
+  });
 
   function setView(view) {
     state.view = view;
