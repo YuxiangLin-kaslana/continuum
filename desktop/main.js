@@ -191,6 +191,9 @@ handle('api:search', (q) => client.request('GET', `/api/v1/search?q=${encodeURIC
 handle('api:projects', () => client.request('GET', '/api/v1/projects'));
 handle('api:projectAction', (id, action) =>
   client.request('POST', `/api/v1/projects/${encodeURIComponent(id)}/${encodeURIComponent(action)}`, {}));
+handle('api:memories', () => client.request('GET', '/api/v1/memories'));
+handle('api:remember', (text) => client.request('POST', '/api/v1/memories', { text }));
+handle('api:forget', (id) => client.request('DELETE', `/api/v1/memories/${encodeURIComponent(id)}`));
 handle('api:inject', () => client.request('GET', '/api/v1/me/inject'));
 handle('api:injectSwitch', (enabled) => client.request('PUT', '/api/v1/me/inject', { enabled: !!enabled }));
 handle('api:setTimezone', (timezone) => client.request('PUT', '/api/v1/me/timezone', { timezone }));

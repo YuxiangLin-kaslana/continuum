@@ -139,6 +139,11 @@ SCHEDULE = {"type": "object", "properties": {
     "day": {"type": "integer", "description": "1-28；用于 month"},
     "once_at": {"type": "string", "description": "YYYY-MM-DD HH:MM，人的时区；用于 once"}},
     "required": ["action", "text", "every"]}
+MEMORY_TOOLS = [
+    tool("remember", "把人的一条偏好、习惯或约定记下来（比如“尽量用 Claude Code”“报告用表格”）。记下后对他以后的所有工作一直有效。"
+         "一句话写清楚，不要写过程。", {"text": {"type": "string"}}),
+    tool("forget", "删掉一条已经记下的事（id 在“人要你记住的事”里）。", {"id": {"type": "string"}}),
+]
 PROJECT_TOOLS = [
     tool("propose_project",
          "提议一个长期项目：人要你长期做某事、定期检查、或到时提醒时用。人确认后它才生效，之后按 schedules 自动提醒或开工。"
@@ -149,8 +154,10 @@ PROJECT_TOOLS = [
          required=["name", "goal", "charter", "schedules"]),
 ]
 PROJECT_RULES = """
-人要你长期做某件事、定期检查、或到时间提醒他时，用 propose_project 提议一个长期项目（人的时区：{tz}，现在是 {now}）。
-提议后它还没生效，要等人在对话里确认；你就 report(state="ready")，summary 说清提议了什么、请他确认。
+人要你按时间反复做某件事（每天检查、每周汇总）、或到某个时间提醒他时，用 propose_project 提议一个长期项目（人的时区：{tz}，
+现在是 {now}）。提议后它还没生效，要等人在对话里确认；你就 report(state="ready")，summary 说清提议了什么、请他确认。
+人说的偏好、习惯和约定（“以后尽量用 X”“记住……”“默认……”“别再……”）不是长期项目：用 remember 记下来，记下就一直生效，
+不需要定时去做什么，也不要为它提议长期项目。不再需要的用 forget 删掉。只有真的调用了 remember，才能说“我记下了”。
 """
 
 # Showing the person things: a file in their conversation, and the forms their app draws.
@@ -304,7 +311,7 @@ ENDS_TURN = {"ready", "blocked", "failed", "dropped"}
 # The tools whose work a person sees as steps of the turn; the rest are the worker's calls to the host, whose words
 # reach the person as messages.
 SHOWN = {"shell", "read_file", "write_file", "list_files", "claude_code", "codex", "ssh", "remote_agent", "dispatch",
-         "show_file", "perceive",
+         "show_file", "perceive", "remember", "forget",
          *INTEGRATION_STEP}
 SHOWN_OUTPUT = 4000
 
@@ -454,6 +461,10 @@ def _step_input(name: str, args: dict[str, Any]) -> str:
         return str(args.get("command", ""))
     if name in DELEGATE_TOOLS:
         return str(args.get("task", ""))
+    if name == "remember":
+        return str(args.get("text", ""))
+    if name == "forget":
+        return str(args.get("id", ""))
     return str(args.get("path") or ".")
 
 
@@ -585,6 +596,7 @@ class AgentExecutor:
         job.projects = getattr(ctx, "projects", None)
         job.crew = getattr(ctx, "crew", None)
         job.injection = getattr(ctx, "injection", None)
+        job.memories = getattr(ctx, "memories", None) if getattr(job, "requester", None) else None
         job.model = model
         job.integrations, connected = _integrations_for(ctx, job)
 
@@ -593,6 +605,7 @@ class AgentExecutor:
             now_connected = [k for k in INTEGRATION_TOOLS if job.integrations and k in job.integrations.connected()]
             return [*_basic(config), PERCEIVE_TOOL, *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
                     *(PROJECT_TOOLS if job.projects else []), *([SHOW_TOOL] if job.projects else []),
+                    *(MEMORY_TOOLS if job.memories is not None else []),
                     *([DISPATCH] if job.crew else []),
                     *(t for kind in now_connected for t in INTEGRATION_TOOLS[kind]),
                     *([REQUEST_TOOL] if job.integrations is not None and job.projects is not None else [])]
@@ -619,6 +632,7 @@ class AgentExecutor:
                 system += INTEGRATION_RULES.format(connected="、".join(named(k) for k in connected) or "无",
                                                    missing="、".join(missing) or "无")
             system += f"\n团队的要求：\n{config.instructions}\n" if config.instructions else ""
+            system += job.memories.brief(job.requester) if job.memories is not None else ""
             messages = [{"role": "system", "content": system}, {"role": "user", "content": job.assignment}]
         job.workdir.mkdir(parents=True, exist_ok=True)
 
@@ -831,7 +845,8 @@ class AgentExecutor:
         connected = job.integrations.connected() if getattr(job, "integrations", None) else set()
         tools = [*_basic(config)[:4], PERCEIVE_TOOL, *(DELEGATE_TOOLS[name] for name in delegates), *(SSH_TOOLS if job.ssh else []),
                  *(t for kind in INTEGRATION_TOOLS if kind in connected for t in INTEGRATION_TOOLS[kind]), FINISH]
-        system = SUB_SYSTEM.format(folder=f"sub-{number}") + _ssh_rules(job) + _host_rules(config, job) + EFFICIENCY_RULES + PERCEIVE_RULES
+        system = SUB_SYSTEM.format(folder=f"sub-{number}") + _ssh_rules(job) + _host_rules(config, job) + EFFICIENCY_RULES + PERCEIVE_RULES + (
+            job.memories.brief(job.requester) if getattr(job, "memories", None) is not None else "")
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
             {"role": "user", "content": f"项目背景：\n{job.assignment}\n\n你的子任务（{label}）：\n{task}"}]
@@ -1064,6 +1079,18 @@ class AgentExecutor:
                 answer = await cli_agents.delegate(name, delegate_config, job, str(args.get("task", "")),
                                                    bool(args.get("fresh")))
                 return answer if len(answer) <= 20000 else answer[:20000] + "\n...[后面截断]", False
+            if name in ("remember", "forget"):
+                memories = getattr(job, "memories", None)
+                if memories is None:
+                    return "错误：这里不能记东西", False
+                if name == "remember":
+                    try:
+                        kept = memories.add(job.requester, str(args.get("text", "")), by=job.ticket_id)
+                    except ValueError as error:
+                        return f"错误：{error}", False
+                    return f"已记下 [{kept['id']}]：{kept['text']}", False
+                gone = memories.remove(job.requester, str(args.get("id", "")))
+                return ("已删掉" if gone else "错误：没有这一条"), False
             if name == "propose_project":
                 projects = getattr(job, "projects", None)
                 if projects is None:

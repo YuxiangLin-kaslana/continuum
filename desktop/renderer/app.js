@@ -307,6 +307,60 @@
     loadInject();
   }
 
+  // --- what the person asked the assistant to remember ---
+
+  async function loadMemories() {
+    if (!api.memories) return;
+    try {
+      drawMemories(await call('memories'));
+    } catch (error) {
+      showStatus(`没取到记忆：${error.message}`);
+    }
+  }
+  function drawMemories(list) {
+    const box = $('memory-list');
+    if (!list.length) {
+      box.replaceChildren(el('li', 'memory empty', '还没有。对助理说“记住……”“以后尽量……”，它会记在这里。'));
+      return;
+    }
+    box.replaceChildren(...list.map((m) => {
+      const item = el('li', 'memory');
+      item.dataset.memory = m.id;
+      item.append(el('span', 'memory-text', m.text), el('span', 'memory-when', day(m.at)));
+      const drop = el('button', 'outline small danger', '删除');
+      drop.type = 'button';
+      drop.addEventListener('click', async () => {
+        if (!drop.dataset.confirm) {
+          drop.dataset.confirm = '1';
+          drop.textContent = '确认删除？';
+          return;
+        }
+        drop.disabled = true;
+        try {
+          await call('forget', m.id);
+          await loadMemories();
+        } catch (error) {
+          showStatus(`没删掉：${error.message}`);
+          drop.disabled = false;
+        }
+      });
+      item.append(drop);
+      return item;
+    }));
+  }
+  $('memory-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const text = $('memory-input').value.trim();
+    if (!text) return;
+    try {
+      await call('remember', text);
+      $('memory-input').value = '';
+      await loadMemories();
+    } catch (error) {
+      showStatus(`没记下：${error.message}`);
+    }
+  });
+
   // --- the person's own prompt on the server: a switch; while on, it goes at the end of their work's context ---
 
   function drawInject(info) {
@@ -347,6 +401,7 @@
     $('view-settings').hidden = view !== 'settings';
     $('view-tools').hidden = view !== 'tools';
     if (view === 'tools') loadToolsTab();
+    if (view === 'settings') loadMemories();
     $('settings').setAttribute('aria-pressed', String(view === 'settings'));
     if (view === 'projects') showProjectsTab();
     if (view === 'chat') {
@@ -632,7 +687,7 @@
   const STEP_NAMES = {
     shell: '运行命令', read_file: '读取文件', write_file: '写入文件', list_files: '查看目录',
     claude_code: '交给 Claude Code', codex: '交给 Codex', ssh: '远程命令', dispatch: '派出 Worker',
-    remote_agent: '交给服务器上的助手',
+    remote_agent: '交给服务器上的助手', remember: '记下', forget: '删掉一条记忆',
     github: 'GitHub', email: '邮箱', slack: 'Slack', google: 'Google', cloudflare: 'Cloudflare', godaddy: 'GoDaddy',
     aws: 'AWS', request_tool: '请你连接工具',
   };

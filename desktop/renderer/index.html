@@ -711,6 +711,10 @@ l-33 -150 -4 -901 -3 -902 25 -28 24 -29 291 0 c277 0 291 1 310 20 20 20 20
 
       <div id="view-settings" class="view tickets settings" hidden>
         <div class="tickets-head"><h2 class="section-head"><span class="slash" aria-hidden="true">//</span><span class="en" aria-hidden="true">SETTINGS</span>设置</h2></div>
+        <div class="group-row working"><h3 class="group">记忆</h3><span class="en" aria-hidden="true">MEMORY</span></div>
+        <p class="hint">你让助理记住的偏好和约定。它每次干活都会照做；不需要了就删掉。</p>
+        <ol id="memory-list" class="memory-list"></ol>
+        <form id="memory-form" class="memory-form"><input id="memory-input" maxlength="300" autocomplete="off" placeholder="加一条，比如：尽量用 Claude Code，不行再用 Codex"><button class="outline" type="submit">记下</button></form>
         <div class="group-row working"><h3 class="group">版本</h3><span class="en" aria-hidden="true">ABOUT</span></div>
         <div class="version-row"><p id="version" class="hint"></p><button id="check-update" class="outline" type="button">检测更新</button></div>
         <p id="update-result" class="hint" hidden></p>

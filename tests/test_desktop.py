@@ -752,6 +752,19 @@ def test_the_person_sends_pictures_and_recordings_chosen_dropped_or_pasted():
         page.fill("#password", "good-password")
         page.click("#connect")
         page.wait_for_selector("#main:not([hidden])")
+        # What the assistant remembers, on the settings page: added and taken back there.
+        page.click("#settings")
+        page.wait_for_selector("#memory-list .memory[data-memory=a1b2]")
+        page.fill("#memory-input", "报告用表格")
+        page.press("#memory-input", "Enter")
+        page.wait_for_selector("#memory-list .memory >> text=报告用表格")
+        page.locator("#memory-list .memory[data-memory=a1b2] button").click()
+        page.locator("#memory-list .memory[data-memory=a1b2] button").click()
+        page.wait_for_selector("#memory-list .memory[data-memory=a1b2]", state="detached")
+        assert page.locator("#memory-list .memory-text").all_inner_texts() == ["报告用表格"]
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-memory.png")
+        page.click("#tab-chat")
         # The person's own prompt: a switch, off until they turn it on, and its words never in the page.
         page.wait_for_selector("#inject:not([hidden])")
         assert page.get_attribute("#inject", "aria-pressed") == "false"

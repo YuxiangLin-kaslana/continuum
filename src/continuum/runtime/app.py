@@ -32,6 +32,7 @@ from .accounts import Accounts
 from .crew import Crew
 from .files import Files
 from .injection import Injection
+from .memories import Memories
 from .integrations import NAMES, Integrations
 from .projects import Projects, project_of_thread, zone
 from .ssh import SshHosts, survey
@@ -126,6 +127,8 @@ class Runtime:
             self.executor.context.integrations = self.integrations
             self.files = Files(self.home / "data" / "files")
             self.injection = Injection(self.home, self.store)
+            self.memories = Memories(self.store)
+            self.executor.context.memories = self.memories
             self.executor.context.injection = self.injection
             self.router.projects = self.executor.context.projects
             self.router.bind(self.engine)

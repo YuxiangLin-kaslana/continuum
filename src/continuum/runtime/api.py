@@ -35,6 +35,10 @@ if TYPE_CHECKING:
 THREAD = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
+class MemoryText(BaseModel):
+    text: str = Field(min_length=1, max_length=300)
+
+
 class InjectSwitch(BaseModel):
     enabled: bool
 
@@ -302,6 +306,24 @@ def create_app(rt: Runtime) -> FastAPI:
         _, by_ticket = project_index(user)
         return [{**s, "project": by_ticket.get(s["ticket_id"], s["ticket_id"])} for s in kind.steps(ctx, user, None,
                                                                                                     limit=600)]
+
+    # What the person asked the assistant to remember: they see it all and may add or take any back.
+    @app.get("/api/v1/memories")
+    async def memories(user: str = Depends(user_of)) -> list[dict[str, Any]]:
+        return rt.memories.list(user)
+
+    @app.post("/api/v1/memories", status_code=201)
+    async def remember(body: MemoryText, user: str = Depends(user_of)) -> dict[str, Any]:
+        try:
+            return rt.memories.add(user, body.text)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
+
+    @app.delete("/api/v1/memories/{ident}")
+    async def forget(ident: str, user: str = Depends(user_of)) -> dict[str, Any]:
+        if not rt.memories.remove(user, ident):
+            raise HTTPException(404, "没有这一条")
+        return {"removed": ident}
 
     # The person's own prompt, added at the end of their work's context while switched on. Its words never come back.
     @app.get("/api/v1/me/inject")

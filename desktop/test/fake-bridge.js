@@ -112,6 +112,7 @@
   const files = {};
   window.__fake = { fire, messages, projects, steps, hold: false, files, opened: [], uploadedNames: {},
     inject: { available: true, name: 'Dsh全破.md', chars: 12000, enabled: false },
+    memories: [{ id: 'a1b2', text: '尽量用 Claude Code，不行再用 Codex', at: new Date().toISOString(), by: 't-9' }],
     release: () => { passes++; },
     gates: () => ({ passes, pauses }),
     // Something the assistant says now, as the server would send it.
@@ -301,6 +302,18 @@
       if (at >= 0) sshHosts[at] = row; else sshHosts.push(row);
       sshHosts.sort((a, b) => a.name.localeCompare(b.name));
       return ok({ ...row });
+    },
+    memories: () => ok(window.__fake.memories.map((m) => ({ ...m }))),
+    remember: (text) => {
+      const m = { id: `m${window.__fake.memories.length + 1}`, text, at: now(), by: 'person' };
+      window.__fake.memories.push(m);
+      return ok(m);
+    },
+    forget: (id) => {
+      const at = window.__fake.memories.findIndex((m) => m.id === id);
+      if (at < 0) return Promise.resolve({ ok: false, status: 404, error: '没有这一条' });
+      window.__fake.memories.splice(at, 1);
+      return ok({ removed: id });
     },
     inject: () => ok({ ...window.__fake.inject }),
     injectSwitch: (enabled) => { window.__fake.inject.enabled = !!enabled; return ok({ ...window.__fake.inject }); },
