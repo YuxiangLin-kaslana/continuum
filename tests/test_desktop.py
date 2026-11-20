@@ -123,6 +123,10 @@ def test_the_window_connects_converses_and_lists_what_waits_for_a_person():
         assert page.evaluate("window.__fake.messages.find(m => m.text === '阈值改成 90%').thread") == "p-ops1"
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-project.png")
+        # Scrolled to the bottom of its conversation, the way back is still in sight.
+        page.evaluate("document.getElementById('view-projects').scrollTop = 1e6")
+        box = page.locator("#project-back").bounding_box()
+        assert box and 0 <= box["y"] < 200, box
         page.click("#project-back")
         assert page.is_visible("#projects-overview")
         page.click("#tab-chat")
@@ -790,6 +794,19 @@ def test_the_person_sends_pictures_and_recordings_chosen_dropped_or_pasted():
         assert page.locator("#memory-list .memory-text").all_inner_texts() == ["报告用表格"]
         if SHOTS:
             page.screenshot(path=f"{SHOTS}/desktop-memory.png")
+        # Day or night, from the settings; kept on this computer.
+        bg = lambda: page.evaluate("getComputedStyle(document.body).backgroundColor")  # noqa: E731
+        dark = bg()
+        page.click("[data-theme-choice=light]")
+        assert page.get_attribute("html", "data-theme") == "light" and bg() != dark
+        assert page.get_attribute("[data-theme-choice=light]", "aria-checked") == "true"
+        assert page.evaluate("localStorage.getItem('continuum.theme')") == "light"
+        page.click("#tab-chat")
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-light.png")
+        page.click("#settings")
+        page.click("[data-theme-choice=dark]")
+        assert page.get_attribute("html", "data-theme") == "dark" and bg() == dark
         page.click("#tab-chat")
         # The person's own prompt: a switch, off until they turn it on, and its words never in the page.
         page.wait_for_selector("#inject:not([hidden])")

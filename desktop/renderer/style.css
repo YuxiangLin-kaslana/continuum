@@ -1,6 +1,6 @@
 /* Continuum desktop — an agent assistant on black: charcoal panels with notched corners, a teal colour for what is
    live or selected, amber for what waits for a person, wide-tracked labels beside the Chinese ones.
-   One dark world on purpose: it does not follow the OS theme. */
+   Dark by default; a light palette (same marks, paper instead of black) when the person picks it in the settings. */
 
 @font-face { font-family: "Jost"; src: url("fonts/Jost.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 
@@ -26,8 +26,54 @@
   --sans: "Jost", "Microsoft YaHei UI", "PingFang SC", "Noto Sans SC", sans-serif;
   --text: "Microsoft YaHei UI", "PingFang SC", "Noto Sans SC", "Jost", system-ui, sans-serif;
   --mark: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjEyODkuMyA0ODUuMSAyMjUxLjUgODk3LjgiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iQ29udGludXVtIiBmaWxsPSIjZTZlZGYwIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLjAwMDAwMCwxNTIwLjAwMDAwMCkgc2NhbGUoMC4xMDAwMDAsLTAuMTAwMDAwKSIKID4KPHBhdGggZD0iTTE3NjY1IDEwMzQ0IGMtMTEgLTEgLTEwMSAtMTAgLTIwMCAtMTkgLTEyOCAtMTIgLTIxMCAtMjUgLTI4NSAtNDUKLTU4IC0xNiAtMTM5IC0zNiAtMTgxIC00NCAtNDIgLTggLTEwMiAtMjUgLTEzNSAtMzkgLTMyIC0xMyAtODQgLTMwIC0xMTQgLTM3Ci0zMCAtNyAtNzUgLTI1IC0xMDAgLTQwIC0yNSAtMTUgLTY3IC0zMyAtOTUgLTM5IC0yNyAtNyAtNjggLTI0IC05MCAtNDAgLTIyCi0xNSAtNTYgLTMzIC03NSAtNDEgLTM3IC0xNCAtMTE3IC01OSAtMjExIC0xMTkgLTU5IC0zNyAtNzcgLTQ4IC0xNjkgLTEwNQotMzAgLTE5IC03MyAtNDggLTk1IC02NiAtMjIgLTE3IC01OSAtNDUgLTgxIC02MyAtMjMgLTE4IC03NCAtNTcgLTExNCAtODcKLTcwIC01MiAtMTI4IC0xMTAgLTQwNSAtMzk5IC0xMzEgLTEzNyAtNDkyIC01NDUgLTU2NSAtNjM4IC00NCAtNTYgLTE1MSAtMTg0Ci0yMjkgLTI3MyAtMjIgLTI1IC01MyAtNjEgLTY4IC04MCAtNTUgLTY3IC0xNjEgLTIwOCAtMjAwIC0yNjUgLTE1IC0yMiAtNDMKLTU4IC02MyAtODEgLTY1IC03NSAtMTY3IC0yMDkgLTE4MyAtMjQxIC05IC0xNyAtMzIgLTQ4IC01MiAtNjggLTE5IC0yMSAtMzUKLTQyIC0zNSAtNDggMCAtMTAgLTcxIC0xMTEgLTExOCAtMTY3IC0xNiAtMTkgLTM2IC00OSAtNDUgLTY2IC05IC0xNyAtMjMgLTM3Ci0zMyAtNDUgLTkgLTggLTI5IC00MSAtNDQgLTc1IC0xNiAtMzQgLTM1IC02NCAtNDQgLTY3IC05IC00IC0yNSAtMjQgLTM0IC00NAotMTcgLTM3IC0zMyAtNjUgLTExOSAtMjAwIC0yNCAtMzcgLTQzIC03MiAtNDMgLTc5IDAgLTYgLTEzIC0yOSAtMjkgLTUxIC0xNQotMjEgLTM4IC02MSAtNDkgLTg3IC0xMiAtMjYgLTMzIC02MSAtNDYgLTc3IC0xMyAtMTUgLTMyIC01MiAtNDIgLTgxIC05IC0yOAotMzAgLTcyIC00NSAtOTcgLTE2IC0yNSAtMjkgLTUwIC0yOSAtNTYgMCAtNiAtMTggLTQ3IC00MCAtOTAgLTIyIC00MyAtNDAKLTg2IC00MCAtOTYgMCAtMTAgLTE1IC00NiAtMzQgLTgyIC0yMyAtNDQgLTM4IC04OSAtNDYgLTE0MyAtNiAtNDQgLTI0IC0xMDcKLTQxIC0xNDMgLTIzIC01MSAtMzMgLTkzIC00NSAtMTk1IC04IC03MiAtMjEgLTE2NyAtMjkgLTIxMSAtMzkgLTIxMSAtNDMKLTQ4NiAtMTAgLTY2NyA5IC00NiAyNCAtMTU4IDM1IC0yNTEgMTUgLTEzNCAyNCAtMTc4IDQ1IC0yMjMgMTUgLTMxIDMzIC05Mwo0MiAtMTM3IDggLTQ1IDI1IC0xMDAgMzggLTEyMyAxMyAtMjMgMzMgLTczIDQ0IC0xMTMgMTEgLTQwIDI5IC04NiA0MCAtMTA0CjEwIC0xOCAyOSAtNTYgNDAgLTg2IDExIC0yOSAzMSAtNzAgNDQgLTkwIDE0IC0yMCAzMCAtNTQgMzcgLTc2IDcgLTIyIDIzIC01MQozNiAtNjUgMTIgLTE0IDM0IC01MCA0OCAtODAgMTUgLTMwIDQzIC03OCA2MyAtMTA2IDEyMSAtMTY0IDE0MyAtMjAwIDE0MwotMjMyIDAgLTE4IDEwIC01MiAyMSAtNzUgMjEgLTQxIDE5OCAtMjQ3IDMwOSAtMzU4IDc1IC03NiAyODYgLTI2MCAzMzUgLTI5MwoyMiAtMTQgNjAgLTQyIDg1IC02MSAyNSAtMTkgNjQgLTQ5IDg4IC02NyAyMyAtMTggNTcgLTQ1IDc1IC02MCAxOCAtMTQgNTcKLTM3IDg3IC01MSAzMCAtMTMgNjEgLTMyIDY5IC00MSA4IC0xMCAzOCAtMjkgNjUgLTQzIDI4IC0xNCA2NSAtMzYgODIgLTQ5IDE3Ci0xMyAzNCAtMjQgMzggLTI0IDcgMCAxNjcgLTc1IDI1NiAtMTIwIDMwIC0xNSA3OCAtMzMgMTA1IC0zOSAyOCAtNyA3MyAtMjYKMTAxIC00MiAyOSAtMTYgODUgLTM1IDEyOCAtNDQgNDMgLTggOTIgLTIzIDExMCAtMzUgMTkgLTExIDg4IC0zMSAxNTQgLTQ1IDY2Ci0xMyAxMzggLTMxIDE1OSAtNDAgMjEgLTkgMTAyIC0yNSAxNzkgLTM1IDc4IC0xMCAxNjggLTI2IDIwMCAtMzQgMTQxIC0zNgoxOTQgLTM3IDIyMTkgLTM0IGwxOTkwIDMgODUgMjMgYzQ3IDEzIDE0NCAzMiAyMTcgNDMgNzMgMTAgMTU4IDI4IDE5MCAzOSAzMgoxMSA5MiAyNiAxMzMgMzUgNDEgOCA5NyAyNyAxMjQgNDEgMjggMTQgODEgMzIgMTE4IDQwIDY5IDE0IDEyMiAzNSAxMzMgNTQgMwo1IDMyIDE3IDYzIDI2IDc3IDIyIDM3NSAxNzAgNDI2IDIxMSAxNSAxMiA0NCAyNyA2NCAzNCAyMCA2IDUzIDI0IDcyIDM5IDIwCjE1IDUzIDM3IDc1IDQ5IDIyIDEyIDY5IDQ0IDEwNSA3MSAzNiAyNyA4MiA1OSAxMDIgNzAgMjEgMTEgNTIgMzQgNzAgNTEgMTgKMTcgMTE1IDEwMCAyMTUgMTg1IDEwMSA4NiAyMDQgMTc2IDIzMCAyMDIgMjcgMjYgOTMgODcgMTQ4IDEzNSA1NSA0OSAxMTQgMTAzCjEzMSAxMjEgMTcgMTcgNDAgMzkgNTIgNDggMTYgMTMgMjIgMjkgMjIgNTkgMCAzOSA1IDQ1IDEzOCAxNzQgNzUgNzMgMTUxIDE0MwoxNjcgMTU2IDE3IDEyIDc1IDY2IDEzMSAxMTggMTk5IDE4OSAyMjcgMjExIDI3NCAyMTEgNDAgMCA0OCA2IDE3NCAxMjcgMTkxCjE4NSAxOTEgMTg0IDI0MSAyMjggMjUgMjIgNzkgNzIgMTE5IDExMCA0MCAzOSAxMTEgMTA0IDE1NyAxNDUgNDYgNDEgMTQzIDEzMQoyMTQgMjAwIDEyNyAxMjMgMTk0IDE4NCAyODkgMjY1IDI2IDIyIDg3IDc4IDEzNCAxMjUgNDggNDcgMTIyIDExNyAxNjUgMTU1CjQ0IDM5IDEzMSAxMjIgMTk2IDE4NSA2NCA2MyAxODQgMTc2IDI2NiAyNTEgODMgNzUgMTYxIDE0OSAxNzUgMTY0IDE0IDE1IDcwCjY2IDEyNCAxMTMgNTUgNDcgMTE0IDEwMCAxMzIgMTE4IDE3IDE4IDc5IDc0IDEzNiAxMjUgNTYgNTEgMTM1IDEyNSAxNzQgMTYzCjM5IDM5IDEyOSAxMjUgMjAwIDE5MSA3MCA2NiAxNDQgMTM2IDE2NCAxNTUgMjAgMTkgODMgNzggMTQwIDEzMCA1OCA1MiAxNjEKMTQ5IDIzMCAyMTUgNjkgNjYgMTk5IDE5MCAyODkgMjc1IDI4NCAyNjggMzMwIDMxMiA0NTEgNDMwIDY1IDYzIDE2MCAxNTMgMjEwCjIwMCA1MSA0NyAxMTggMTEyIDE0OSAxNDQgMzEgMzMgNjUgNjYgNzUgNzUgMTAgOSAzMyAyOCA1MCA0MiAzMSAyNyAyMzYgMTc5CjM0NCAyNTcgMzMgMjMgNjQgNDIgNjkgNDIgNiAwIDI5IDE0IDUyIDMwIDIzIDE3IDY1IDQwIDkzIDUxIDI4IDExIDY5IDMwIDkyCjQzIDIzIDEzIDUyIDI3IDY2IDMxIDE0IDQgNTkgMjIgMTAwIDQwIDQxIDE5IDEwMyAzOSAxMzggNDUgMzUgNiA5NiAyNCAxMzUKNDAgNzEgMjggODggMzEgMzg1IDYwIDU4IDYgNDIwIDEwIDgzNyAxMCA4NzkgMCAxMDk0IC0xMyAxMjYyIC03NiAzNSAtMTMgOTYKLTI5IDEzNSAtMzUgNDAgLTYgMTAyIC0yNCAxMzggLTM5IDM2IC0xNiA4NSAtMzMgMTEwIC00MCAyNSAtNiA2OCAtMjQgOTUgLTQwCjI4IC0xNSA2OCAtMzMgOTAgLTQwIDM2IC0xMSA3NSAtMzIgMTgxIC05NiAyNyAtMTYgMTIzIC04MSAxOTggLTEzNCAxNjMgLTExNAo0NDYgLTM3NCA1MTIgLTQ3MCAxMyAtMTkgNDkgLTY5IDc5IC0xMTAgMzAgLTQxIDY0IC05MyA3NiAtMTE1IDEyIC0yMiAzMSAtNTMKNDQgLTcwIDEyIC0xNiAzMiAtNTAgNDUgLTc1IDEzIC0yNSAzMyAtNTkgNDYgLTc2IDEzIC0xNyAzMyAtNTYgNDMgLTg2IDExCi0zMSAyNiAtNjcgMzUgLTgwIDkgLTE0IDI3IC01NiA0MCAtOTQgMTMgLTM5IDMxIC04NCA0MCAtMTAyIDkgLTE3IDIzIC03NyAzMgotMTM0IDkgLTU3IDI3IC0xMjggNDAgLTE1OSAzNSAtODYgNDUgLTIwNSA0NiAtNTQ0IDAgLTMzMSAtNiAtMzk5IC00OCAtNDkyCi0xMyAtMzAgLTMxIC05NiAtMzkgLTE0NiAtOSAtNTAgLTI3IC0xMTYgLTM5IC0xNDYgLTEzIC0zMSAtMzEgLTgzIC00MSAtMTE2Ci05IC0zMyAtMjUgLTczIC0zNSAtOTAgLTkgLTE2IC0yNSAtNTUgLTM1IC04NSAtMTAgLTMwIC0yOCAtNjggLTQwIC04NSAtMTIKLTE2IC0zNCAtNTIgLTQ5IC04MCAtMTUgLTI3IC0zNyAtNjQgLTQ5IC04MSAtMTIgLTE4IC0zMCAtNDUgLTQwIC02MCAtMzggLTYzCi0xNDYgLTIwOSAtMTk3IC0yNjYgLTE1NSAtMTc1IC0zMjcgLTMzMiAtNDQyIC00MDUgLTI5IC0xOCAtNjMgLTQ0IC03OCAtNTgKLTE0IC0xNCAtMzEgLTI1IC0zNiAtMjUgLTYgMCAtMzkgLTIwIC03NCAtNDUgLTM1IC0yNSAtNjcgLTQ1IC03MiAtNDUgLTQgMAotMjggLTEzIC01NCAtMzAgLTI2IC0xNiAtNjMgLTM1IC04MyAtNDEgLTIwIC02IC01MiAtMjIgLTcxIC0zNSAtMTkgLTEzIC02NgotMzAgLTEwMyAtMzkgLTM4IC05IC05MiAtMjkgLTEyMCAtNDUgLTMwIC0xNiAtODIgLTM0IC0xMjIgLTQxIC0zOCAtNiAtOTUKLTIyIC0xMjcgLTM1IC03MiAtMzAgLTExNCAtMzkgLTI2OCAtNTkgLTY5IC04IC0xNjEgLTIzIC0yMDUgLTMxIC03MiAtMTUKLTMxOSAtMTcgLTI1NzUgLTIxIC0yNDQ2IC00IC0yNzg2IC0xIC0yOTU1IDI3IC0zMyA1IC0xNzAgMTcgLTMwNSAyNSAtMzIyIDIwCi00MTIgMzAgLTUyMyA1OSAtNTAgMTMgLTE1MyAyOSAtMjI3IDM2IC04MCA3IC0xNTcgMjAgLTE5MCAzMSAtMTA0IDM4IC0xMjkKNDMgLTE1NiAzMSAtMzIgLTE1IC0zMCAtMzAgOCAtNTAgMTcgLTkgNDggLTMzIDY4IC01MiAzNyAtMzYgMTE2IC05NSAxNjAKLTExOSAxNCAtNyAzNyAtMjQgNTEgLTM3IDE0IC0xNCA0OCAtMzkgNzYgLTU3IDc0IC00NyAxNTEgLTEwMSAyMDggLTE0NyAyOAotMjIgNzQgLTU2IDEwMiAtNzUgNTIgLTM1IDU5IC00OCA2NSAtMTA5IDIgLTIxIDEyIC0zNCAzNyAtNDcgMTkgLTEwIDQ3IC0zMAo2MiAtNDUgMTYgLTE1IDQ5IC0zOSA3MyAtNTMgNjcgLTQwIDEzOCAtODcgMTcxIC0xMTQgMTcgLTEzIDQ0IC0zMSA2MSAtNDAgMTcKLTkgMzcgLTIzIDQ0IC0zMiA4IC05IDMyIC0yNiA1NCAtMzcgMjMgLTExIDU5IC0zNyA4MiAtNTcgMjIgLTIwIDU0IC00NCA3MAotNTMgMTYgLTEwIDU2IC0zOCA4OSAtNjIgMzMgLTI1IDgyIC01NyAxMDggLTcxIDI2IC0xNCA1MSAtMzMgNTQgLTQxIDMgLTggMzIKLTI4IDY0IC00NCAzMSAtMTYgNjAgLTM0IDY0IC00MCAzIC02IDMwIC0yNiA1OCAtNDUgMjkgLTE4IDg2IC01NyAxMjcgLTg1IDQxCi0yOSA5MSAtNjAgMTEwIC03MCAxOSAtMTAgNDMgLTI3IDU0IC0zOSAxMCAtMTEgNDQgLTMwIDc1IC00MSAzMSAtMTIgNjcgLTMyCjgxIC00NSAxNCAtMTIgNDggLTM0IDc1IC00NyAyOCAtMTMgOTcgLTQ5IDE1NSAtODAgNTggLTMwIDEyOCAtNjAgMTU1IC02NyAyOAotNyA3MCAtMjUgOTUgLTQxIDMwIC0xOSA3MiAtMzMgMTMwIC00NCA0NyAtOCAxMTAgLTI2IDE0MCAtMzkgMzAgLTE0IDg5IC0zMAoxMzAgLTM3IDQxIC02IDEzOCAtMjMgMjE1IC0zOCBsMTQwIC0yNyAxNDcwIDAgMTQ3MCAwIDEwNSAyMiBjNTggMTIgMTYxIDI5CjIyOSAzOCA4NyAxMiAxMzkgMjQgMTczIDQxIDI2IDEzIDgwIDMxIDEyMCAzOSA0MyA5IDkyIDI4IDEyMCA0NiAyNiAxNyA3MyAzOAoxMDUgNDYgMzIgOCA2OSAyMyA4MyAzMyAxNCAxMCA1MCAzMCA4MCA0NCA4OSA0MiAxNTQgNzkgMTkxIDEwOCAyMCAxNCA1NiAzNgo4MSA0OCAyNiAxMiA0OSAyOCA1MiAzNSAzIDggMjkgMzAgNTggNDkgMjkgMjAgNzYgNTQgMTAzIDc2IDI4IDIyIDczIDU4IDEwMAo3OSAxMjAgOTQgMzcwIDM2MyA0NzAgNTA2IDE5IDI4IDUxIDcwIDcwIDk1IDkyIDEyMCAxMTUgMTU5IDExNSAxOTcgMCA0MSAyNgo4NSA5OSAxNjkgMjAgMjIgNDQgNTQgNTMgNzAgMTAgMTYgMzggNTYgNjMgODkgMjUgMzMgNTkgODEgNzYgMTA3IDE2IDI1IDM2CjQ5IDQ0IDUyIDggMyAyMyAyMiAzNSA0MyAxMSAyMSAzNSA1NyA1MyA3OSAxOCAyMyA0MCA1NCA1MCA3MCA5IDE2IDM3IDU2IDYyCjg5IDI1IDMzIDUzIDczIDYzIDg5IDkgMTUgMjcgNDIgMzkgNjAgMTMgMTcgMzEgNDUgNDIgNjEgMTAgMTcgMzMgNDggNTAgNzAKNDUgNTcgMTIxIDE3MyAxMjEgMTg0IDAgNiAxOCAzMSA0MCA1NiAyMiAyNSA0MCA1MSA0MCA1NyAwIDYgMjAgMzcgNDUgNzAgMjUKMzMgNDUgNjYgNDUgNzIgMCA3IDkgMjEgMjEgMzIgMTIgMTAgMzAgMzcgNDEgNTkgMTkgMzggNTkgMTAzIDEyMCAxOTIgMTYgMjMKMzUgNjEgNDQgODUgOCAyNCAyOCA1NiA0MyA3MyAxNiAxNiAzNiA1MiA0NSA3OSA5IDI3IDI0IDU4IDMzIDY5IDE3IDE4IDQ2IDcxCjExMiAyMDQgMTcgMzMgNDIgNzggNTYgOTggMTQgMjEgMjkgNTQgMzUgNzQgNSAyMSAyNCA1OCA0MSA4NCAxNyAyNiAzOCA3MyA0NgoxMDQgOCAzMSAyNCA3NSAzNSA5NiAzMyA2NSA4OCAyMzUgMTEzIDM0NyAxMyA1OCAzNSAxMzcgNDggMTc1IDE0IDQwIDI4IDEwNwozMiAxNTUgMyA0NyAxOCAxNTcgMzIgMjQ1IDMxIDIwMCAyOCAzNjYgLTExIDc2MCAtMjUgMjM5IC0zMSAyNzcgLTU2IDMzNSAtMTUKMzYgLTM1IDk4IC00NCAxMzkgLTkgNDAgLTI3IDk5IC00MCAxMzAgLTEzIDMxIC0yOSA3NiAtMzYgMTAxIC02IDI1IC0yMiA2MwotMzUgODYgLTEzIDIyIC0yOSA2MiAtMzYgODggLTYgMjYgLTI2IDY5IC00NCA5NCAtMTcgMjYgLTM3IDYzIC00NCA4MyAtNiAyMAotMjMgNTEgLTM3IDcwIC0xNCAxOSAtMzUgNTIgLTQ1IDc0IC0xOSAzOSAtNTcgOTYgLTExOCAxODAgLTE2IDIyIC0zNiA1NyAtNDQKNzcgLTggMjAgLTI1IDQxIC0zNiA0NyAtMTEgNyAtMjggMjYgLTM3IDQ0IC00MyA4MiAtMzQzIDQwNiAtNDgzIDUyMCAtMTUzCjEyNSAtMjMyIDE4OCAtMjg2IDIyNCAtMjIgMTUgLTUzIDM4IC02OSA1MSAtMTcgMTMgLTUzIDM0IC04MCA0NiAtMjggMTMgLTU3CjMxIC02NSA0MCAtOCAxMCAtNDIgMzEgLTc1IDQ3IC0zNCAxNiAtMTA0IDUyIC0xNTYgODAgLTUyIDI4IC0xMTMgNTcgLTEzNSA2NQotMjEgOCAtNjAgMjggLTg1IDQ0IC0yNSAxNiAtNzAgMzUgLTEwMCA0MSAtMzAgNiAtNzggMjQgLTEwNyAzOSAtMjggMTUgLTg2CjM1IC0xMjkgNDUgLTQyIDkgLTk3IDI2IC0xMjIgMzYgLTI0IDExIC04OCAyNiAtMTQxIDM1IC01MyA4IC0xMzYgMjUgLTE4NiAzOQotMTAyIDI2IC0xMjEgMjkgLTM3MCA1MiAtMTUxIDE0IC0zNjUgMTcgLTEzMjAgMjAgLTc1MSAzIC0xMTgwIDAgLTEyNjAgLTYKLTY2IC02IC0xNzggLTE2IC0yNTAgLTIyIC03MSAtNiAtMTYxIC0yMCAtMjAwIC0zMCAtMzggLTExIC0xMjMgLTMwIC0xODggLTQ0Ci02NCAtMTQgLTEzNSAtMzQgLTE1NiAtNDQgLTIxIC0xMSAtNjkgLTI3IC0xMDcgLTM2IC0zOCAtOSAtOTQgLTI5IC0xMjQgLTQ1Ci0zMSAtMTUgLTgyIC0zNSAtMTE0IC00NCAtMzIgLTggLTY4IC0yNCAtODAgLTM1IC0xMiAtMTIgLTUxIC0zMiAtODUgLTQ2IC0zNQotMTMgLTcwIC0zMCAtNzggLTM3IC0xNiAtMTMgLTg2IC01NCAtMTg0IC0xMDYgLTMwIC0xNyAtNjEgLTM4IC02OSAtNDcgLTggLTkKLTM3IC0yOCAtNjQgLTQyIC0yOCAtMTQgLTY4IC00MCAtODggLTU3IC0yMCAtMTcgLTU4IC00NyAtODMgLTY2IC0yNSAtMTkgLTYzCi00OSAtODMgLTY1IC0yMCAtMTcgLTUzIC00MyAtNzMgLTU4IC0yMCAtMTQgLTkzIC03OSAtMTYxIC0xNDQgLTY4IC02NSAtMTYxCi0xNTIgLTIwNyAtMTkzIC00NSAtNDEgLTEzMyAtMTI0IC0xOTUgLTE4NSAtNjMgLTYwIC0xNTUgLTE0OCAtMjA1IC0xOTUgLTUxCi00NyAtMTQzIC0xMzQgLTIwNiAtMTk1IC02MiAtNjAgLTE1NSAtMTQ4IC0yMDcgLTE5NSAtNTEgLTQ3IC0xNDkgLTEzOSAtMjE4Ci0yMDYgLTEyNyAtMTIyIC0yMDMgLTE5NCAtNDM0IC00MDkgLTcxIC02NiAtMTgyIC0xNzIgLTI0NyAtMjM1IC02NSAtNjMgLTE5MwotMTg3IC0yODUgLTI3NSAtOTIgLTg4IC0yMDQgLTE5NiAtMjQ5IC0yNDAgLTEzMSAtMTI3IC00MTIgLTM5NSAtNTA1IC00ODEKLTQ3IC00MyAtMTY0IC0xNTcgLTI2MSAtMjUzIC0xNzUgLTE3MiAtMTc3IC0xNzQgLTIyNyAtMTc5IC00NiAtNCAtNTYgLTEwCi0xMjQgLTc0IC00MCAtMzkgLTEyNyAtMTIyIC0xOTMgLTE4NSAtMzY1IC0zNDcgLTEyNTcgLTEyMzQgLTE4OTAgLTE4NzggLTIxNwotMjIwIC0zNzIgLTM2MiAtNDI2IC0zOTAgLTE5IC0xMCAtNTIgLTMzIC03MyAtNTEgLTIyIC0xOSAtNDUgLTM0IC01MiAtMzQgLTcKMCAtMjUgLTExIC00MSAtMjQgLTE1IC0xMyAtNTMgLTM2IC04MyAtNTEgLTMwIC0xNSAtNjggLTM4IC04NSAtNTAgLTE2IC0xMgotNTIgLTMwIC03OSAtNDAgLTI3IC0xMCAtNjUgLTI4IC04NCAtNDEgLTE5IC0xMyAtNTAgLTI2IC03MSAtMzAgLTU4IC05IC0xMDMKLTI1IC0xNDcgLTUwIC0yOCAtMTcgLTc1IC0yOSAtMTQ4IC0zOSAtNjAgLTggLTE0MiAtMjQgLTE4MyAtMzUgLTE0OSAtMzkKLTI2OCAtNDEgLTE3NzggLTM4IGwtMTQ1MCA0IC0xMjAgMjcgYy02NiAxNSAtMTc3IDM0IC0yNDggNDIgLTEwMyAxMiAtMTM4IDIxCi0xODUgNDUgLTMyIDE3IC04OCAzNCAtMTI3IDQwIC00MSA3IC05MCAyMyAtMTIwIDM5IC0yNyAxNiAtNjggMzQgLTkwIDQwIC0zOQoxMSAtMTI4IDUyIC0yMzAgMTA0IC0yNyAxNCAtNzkgNDAgLTExNCA1NyAtMzUgMTYgLTc2IDQxIC05MiA1NCAtMTYgMTQgLTM5CjI4IC01MSAzMiAtMjMgNiAtMjM0IDE1OSAtMjc1IDE5OCAtMTIgMTIgLTQ3IDQ0IC03OCA3MSAtMTI1IDExMCAtMjAwIDE4NAotMjYxIDI1NSAtMzUgNDEgLTgwIDkzIC05OSAxMTUgLTU1IDYyIC0xMDIgMTI2IC0xMjYgMTcwIC0xMiAyMiAtMjggNDcgLTM1CjU2IC0xNSAxNiAtNTggOTcgLTEyMSAyMjIgLTE4IDM4IC00MiA4MSAtNTMgOTUgLTExIDE1IC0yNCA1MSAtMzAgODEgLTUgMzAKLTIzIDc0IC00MCA5OCAtMTYgMjUgLTM0IDcwIC0zOSAxMDEgLTYgMzIgLTI0IDk4IC00MSAxNDcgLTYxIDE4MyAtOTcgNTk0Ci03MSA4MTAgNSAzOSAxNyAxMzggMjYgMjIwIDkgODMgMjYgMTc1IDM3IDIwNSAyNSA3MCAzNCAxMDIgNDggMTcyIDYgMzEgMjMKNzQgMzcgOTUgMTQgMjEgMzEgNTkgMzggODQgNyAyNSAzMSA3NiA1NCAxMTQgMjIgMzggNDEgNzIgNDEgNzcgMCA0IDE3IDM0IDM4CjY3IDIwIDMzIDU1IDkwIDc3IDEyNyAyMiAzNyA1MiA3OSA2NiA5NCAxNCAxNSAzNCA0MSA0NCA1NiA4OCAxMzUgNDAxIDQ0MAo1MTEgNDk3IDE2IDggNDAgMjcgNTQgNDIgMTQgMTUgNDMgMzYgNjUgNDcgMjIgMTEgNDkgMjggNjAgMzggMjIgMjEgOTggNjMKMTk0IDExMCAzNSAxNyA4MCA0MiAxMDAgNTUgMjAgMTIgNTQgMjggNzYgMzUgMjIgNyA1NCAyMyA3MSAzNiAxOCAxMyA2MyAzMgoxMDEgNDMgMzggMTAgODggMjggMTExIDQwIDIzIDEyIDg4IDMyIDE0NSA0NiA1NiAxMyAxMjUgMzMgMTUyIDQ0IDI4IDEwIDc1CjIyIDEwNSAyNiAzMCA0IDEyMCAyMCAyMDAgMzYgODAgMTYgMjAxIDM0IDI3MCAzOSAxNzYgMTQgNTQ1NiAxNCA1NjU3IDAgODQKLTYgMTkyIC0xNyAyNDAgLTI2IDE1NCAtMjcgMTk1IC0zMyAzNDggLTQ5IDgyIC04IDE4MSAtMjQgMjIwIC0zNSA3NSAtMjEgMzI3Ci02MCAzODYgLTYwIDIwIDAgNTcgLTkgODMgLTIxIDI2IC0xMSA5NiAtMjkgMTU3IC0zOSA2MSAtMTEgMTM1IC0zMCAxNjUgLTQ0CjMxIC0xNCA5NCAtMzMgMTQwIC00MSA0NiAtOSAxMTQgLTI3IDE1MSAtNDAgMzggLTEzIDEwNSAtMzAgMTUwIC0zOSA0NSAtOCA5NAotMTggMTA5IC0yMiBsMjYgLTcgLTIxIDQyIGMtMTIgMjMgLTM4IDUyIC02MCA2NiAtMjIgMTMgLTQ1IDMyIC01MyA0MyAtNyAxMAotMzUgMzQgLTYxIDUzIC0yNyAxOSAtNzQgNTMgLTEwNSA3NiAtMzEgMjMgLTc5IDU4IC0xMDcgNzggLTI3IDE5IC03NyA1NQotMTEwIDgwIC0zMyAyNCAtODIgNjEgLTExMCA4MCAtMjcgMjAgLTc1IDU2IC0xMDUgODEgLTMwIDI0IC03MSA1NiAtOTAgNjkKLTE5IDE0IC01NCA0MSAtNzggNjAgLTM1IDI4IC01MiAzNSAtODcgMzUgLTM2IDAgLTUyIDcgLTg5IDM4IC0yNSAyMCAtNjkgNTUKLTk3IDc3IC0yOCAyMiAtNjggNTQgLTg4IDcxIC01MSA0MiAtMTY4IDEyNCAtMTc4IDEyNCAtNSAwIC0yMiAxNCAtMzkgMzEgLTE2CjE3IC00NSAzOSAtNjQgNDkgLTE5IDEwIC02NiA0NSAtMTA1IDc3IC0zOCAzMiAtODYgNzAgLTEwNSA4MyAtMTkgMTMgLTM5IDMwCi00NSAzNyAtMTAgMTQgLTc5IDYzIC0xNTMgMTEwIC0yNCAxNiAtNjMgNDQgLTg3IDYzIC0yMyAxOSAtNjQgNTEgLTkwIDcwIC0yNgoxOSAtNjMgNDkgLTgzIDY2IC0yMSAxNyAtNTUgNDAgLTc3IDUyIC0yMiAxMSAtNTQgMzMgLTcyIDQ4IC0xNyAxNiAtNjYgNTEKLTExMCA3OCAtNDMgMjcgLTk0IDYwIC0xMTMgNzIgLTE5IDEzIC01NyAzMiAtODMgNDMgLTI2IDEyIC02MiAzMiAtODAgNDUgLTE4CjEzIC01MiAyOSAtNzcgMzYgLTI1IDYgLTY1IDI1IC05MCA0MCAtMjUgMTYgLTcwIDM0IC0xMDAgNDEgLTMwIDYgLTg0IDI0Ci0xMjAgMzkgLTM2IDE1IC05NiAzMyAtMTM1IDM5IC0zOCA2IC0xMDggMjIgLTE1NSAzNiAtODYgMjYgLTEzNiAzMyAtNDMwIDYwCi0xNDEgMTMgLTQwNiAxNSAtMTc3NSAxNCAtODg2IC0xIC0xNjE5IC0zIC0xNjMwIC01eiIvPgo8L2c+PC9zdmc+Cg==");
+  --code-bg: #070a0c;
+  --code-bg-2: #0b1416;
+  --code-line: #1b2e31;
+  --user-bubble: #142a2e;
+  --user-bubble-line: #24484d;
+  --strong: #ffffff;
+  --wash: rgba(255, 255, 255, 0.02);
+  --wash-2: rgba(255, 255, 255, 0.07);
+  --hl-key: #c792ea;
+  --hl-str: #a5d6a7;
+  --hl-attr: #8fb8ff;
   --notch: 12px;
   color-scheme: dark;
+}
+
+
+/* The light palette: the same marks on paper. Chosen in the settings (or following the system). */
+:root[data-theme="light"] {
+  --bg: #f5f7f8;
+  --panel: #ffffff;
+  --panel-2: #f0f3f5;
+  --panel-3: #e7ecef;
+  --line: #dde3e7;
+  --line-2: #c3cdd4;
+  --ink: #141f26;
+  --soft: #3b4952;
+  --dim: #64727b;
+  --faint: #95a1a8;
+  --teal: #0c8784;
+  --teal-2: #0a7674;
+  --teal-bg: rgba(12, 135, 132, 0.08);
+  --teal-line: rgba(12, 135, 132, 0.45);
+  --amber: #b4690a;
+  --amber-bg: rgba(180, 105, 10, 0.08);
+  --amber-line: rgba(180, 105, 10, 0.6);
+  --red: #c93636;
+  --code-bg: #f2f5f7;
+  --code-bg-2: #ecf5f5;
+  --code-line: #cfe2e2;
+  --user-bubble: #e1f2f1;
+  --user-bubble-line: #b6dbd8;
+  --strong: #000000;
+  --wash: rgba(0, 0, 0, 0.025);
+  --wash-2: rgba(0, 0, 0, 0.06);
+  --hl-key: #7c3aed;
+  --hl-str: #2e7d32;
+  --hl-attr: #1d4ed8;
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -93,7 +139,7 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 .build { font-family: var(--sans); font-size: 10px; letter-spacing: 0.26em; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: 4px; }
 .window-controls { margin-left: auto; display: flex; height: 100%; -webkit-app-region: no-drag; }
 .win { position: relative; width: 42px; height: 100%; border: 0; background: transparent; color: var(--dim); }
-.win:hover { background: rgba(255, 255, 255, 0.07); color: var(--ink); }
+.win:hover { background: var(--wash-2); color: var(--ink); }
 .win.close:hover { background: #c4373d; color: #fff; }
 /* Drawn, not typed, so they look the same whatever fonts a machine has. */
 .win::before, .win::after { content: ""; position: absolute; left: 50%; top: 50%; }
@@ -113,8 +159,8 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
     linear-gradient(var(--b) 0 0) bottom left / 16px 1px no-repeat, linear-gradient(var(--b) 0 0) bottom left / 1px 16px no-repeat,
     linear-gradient(var(--b) 0 0) bottom right / 16px 1px no-repeat, linear-gradient(var(--b) 0 0) bottom right / 1px 16px no-repeat; }
 .emblem { display: grid; justify-items: center; gap: 14px; margin: 0 6px 6px; }
-.em-mark { width: 150px; height: auto; color: #fff; }
-.em-word { width: 250px; height: auto; color: #fff; }
+.em-mark { width: 150px; height: auto; color: var(--strong); }
+.em-word { width: 250px; height: auto; color: var(--strong); }
 .em-sub { display: flex; align-items: center; gap: 12px; font-family: var(--sans); font-size: 11px; font-weight: 500; letter-spacing: 0.34em; color: var(--amber); }
 .em-sub::before, .em-sub::after { content: ""; width: 18px; height: 1px; background: var(--amber); opacity: 0.8; }
 .section-head { display: flex; align-items: baseline; gap: 12px; margin: 10px 0 0; padding-bottom: 10px; border-bottom: 1px solid var(--line);
@@ -143,7 +189,7 @@ form#setup-form label .i { color: var(--soft); }
 /* --- main --- */
 .main { min-height: 0; display: grid; grid-template-rows: auto 1fr auto auto; }
 .bar { position: relative; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; height: 54px; border-bottom: 1px solid var(--line); padding: 0 10px 0 0; }
-.stripes { width: 44px; height: 100%; background: repeating-linear-gradient(115deg, transparent 0 7px, rgba(255,255,255,0.07) 7px 12px); }
+.stripes { width: 44px; height: 100%; background: repeating-linear-gradient(115deg, transparent 0 7px, var(--wash-2) 7px 12px); }
 .tabs { display: flex; align-items: center; height: 100%; }
 .tabs button {
   position: relative; height: 100%; display: inline-flex; align-items: center; gap: 9px; padding: 0 26px; border: 0; background: transparent;
@@ -186,13 +232,13 @@ form#setup-form label .i { color: var(--soft); }
 .messages { list-style: none; margin: 0; padding: 16px 14px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
 .msg { display: grid; grid-template-columns: 30px minmax(0, 1fr) 30px; gap: 4px 10px; align-items: start; }
 .msg.arrived, .card.arrived { animation: incoming 0.3s ease-out both; }
-.avatar { width: 30px; height: 30px; border-radius: 50%; overflow: hidden; display: block; flex: none; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.avatar { width: 30px; height: 30px; border-radius: 50%; overflow: hidden; display: block; flex: none; box-shadow: 0 0 0 1px var(--wash-2); }
 .avatar svg { display: block; width: 100%; height: 100%; }
 .avatar.sm { width: 20px; height: 20px; }
 .bubble { padding: 9px 13px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.65; }
 .msg .meta { font-family: var(--sans); font-size: 11px; color: var(--dim); letter-spacing: 0.06em; }
 .msg.user .avatar { grid-column: 3; grid-row: 1; }
-.msg.user .bubble { grid-column: 2; grid-row: 1; justify-self: end; max-width: 92%; background: #142a2e; border: 1px solid #24484d; }
+.msg.user .bubble { grid-column: 2; grid-row: 1; justify-self: end; max-width: 92%; background: var(--user-bubble); border: 1px solid var(--user-bubble-line); }
 .msg.user .meta { grid-column: 2; justify-self: end; }
 .msg.reply .avatar, .msg.acknowledgement .avatar, .msg.notice .avatar { grid-column: 1; grid-row: 1; }
 /* The assistant's words are not boxed: they sit on the page beside its avatar, the way a chat app writes them. */
@@ -215,7 +261,7 @@ form#setup-form label .i { color: var(--soft); }
 .work-box > summary:hover { color: var(--soft); }
 .work-box > summary .i { width: 13px; height: 13px; transition: transform 0.15s; }
 .work-box[open] > summary .i { transform: rotate(90deg); }
-.work.running .work-label { background: linear-gradient(90deg, var(--dim) 0%, #e6edf0 50%, var(--dim) 100%) 0 0 / 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 1.6s linear infinite; }
+.work.running .work-label { background: linear-gradient(90deg, var(--dim) 0%, var(--ink) 50%, var(--dim) 100%) 0 0 / 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 1.6s linear infinite; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 .work-spin { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--line-2); border-top-color: var(--teal); animation: spin 0.8s linear infinite; }
 .work-done { width: 6px; height: 6px; border-radius: 50%; background: var(--teal-line, #3aa9ac); }
@@ -223,16 +269,16 @@ form#setup-form label .i { color: var(--soft); }
 .work-steps { list-style: none; margin: 6px 0 2px 5px; padding: 0 0 0 14px; border-left: 1px solid var(--line); display: grid; gap: 4px; }
 .step { font-size: 12.5px; color: var(--soft); }
 .step summary { list-style: none; display: flex; align-items: center; gap: 7px; cursor: pointer; padding: 3px 0; min-width: 0; }
-.step summary:hover .step-name { color: #e6edf0; }
+.step summary:hover .step-name { color: var(--ink); }
 .step summary > .i { width: 14px; height: 14px; flex: none; color: var(--dim); }
 .step-name { flex: none; }
-.step-input { font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; color: var(--teal); background: #0b1416; border: 1px solid #1b2e31; padding: 1px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.step-input { font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; color: var(--teal); background: var(--code-bg-2); border: 1px solid var(--code-line); padding: 1px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .step-state { margin-left: auto; flex: none; display: grid; place-items: center; width: 14px; height: 14px; }
 .step-state .i { width: 12px; height: 12px; color: var(--teal); }
 .step.running .step-state { border-radius: 50%; border: 1.5px solid var(--line-2); border-top-color: var(--teal); width: 10px; height: 10px; animation: spin 0.8s linear infinite; }
 .step.error .step-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
 .step.error .step-name { color: var(--red); }
-.step-output { margin: 4px 0 6px; padding: 8px 10px; background: #070a0c; border: 1px solid var(--line); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; line-height: 1.55; color: var(--soft); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
+.step-output { margin: 4px 0 6px; padding: 8px 10px; background: var(--code-bg); border: 1px solid var(--line); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; line-height: 1.55; color: var(--soft); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
 .step.think .step-output { font-family: inherit; font-size: 12.5px; color: var(--dim); background: none; border: 0; border-left: 2px solid var(--line-2); padding: 2px 0 2px 10px; }
 .step-output.waiting { color: var(--dim); }
 .step .note { margin: 2px 0; color: var(--soft); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
@@ -245,7 +291,7 @@ form#setup-form label .i { color: var(--soft); }
 .bubble th, .bubble td { text-align: left; padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
 .bubble th { color: var(--dim); font-weight: 500; }
 .bubble code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; color: var(--teal); }
-.bubble strong { color: #fff; }
+.bubble strong { color: var(--strong); }
 @keyframes incoming { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
 
 .empty { padding: 34px 22px; margin: 0; text-align: center; color: var(--dim); display: grid; gap: 10px; justify-items: center; }
@@ -280,7 +326,7 @@ form#setup-form label .i { color: var(--soft); }
 .card.person .stage { color: var(--amber); }
 .card.ended .stage { color: var(--dim); }
 .card-title { font-size: 17px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
-.detail { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; padding: 8px 12px; border-left: 1px solid var(--line-2); background: rgba(255,255,255,0.02); font-size: 13px; }
+.detail { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; padding: 8px 12px; border-left: 1px solid var(--line-2); background: var(--wash); font-size: 13px; }
 .detail dt { color: var(--dim); white-space: nowrap; }
 .detail dd { margin: 0; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .card.person .detail { border-left-color: var(--amber-line); }
@@ -310,7 +356,7 @@ form#setup-form label .i { color: var(--soft); }
 .icon-btn[aria-pressed="true"] { color: var(--teal); }
 .settings .hint { margin: 2px 0; color: var(--dim); font-size: 12.5px; line-height: 1.6; }
 .settings .hint code { font-family: "Cascadia Mono", Consolas, monospace; color: var(--soft); }
-.key { display: block; font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; line-height: 1.55; color: var(--teal); background: #070a0c; border: 1px solid var(--line); padding: 8px 10px; overflow-wrap: anywhere; user-select: all; }
+.key { display: block; font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; line-height: 1.55; color: var(--teal); background: var(--code-bg); border: 1px solid var(--line); padding: 8px 10px; overflow-wrap: anywhere; user-select: all; }
 .card.host.ok { --edge: var(--teal-line); }
 .card.host.bad { --edge: rgba(239, 93, 93, 0.55); }
 .card.host.bad .stage { color: var(--red); }
@@ -338,19 +384,19 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 .step summary { align-items: flex-start; }
 .step summary > .i, .step-state { margin-top: 2px; }
 .step-input { flex: 1 1 auto; white-space: pre-wrap; overflow-wrap: anywhere; text-overflow: clip; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
-.step-command { margin: 4px 0 0; padding: 8px 10px; background: #0b1416; border: 1px solid #1b2e31; font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; line-height: 1.55; color: var(--teal); white-space: pre-wrap; overflow-wrap: anywhere; }
+.step-command { margin: 4px 0 0; padding: 8px 10px; background: var(--code-bg-2); border: 1px solid var(--code-line); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; line-height: 1.55; color: var(--teal); white-space: pre-wrap; overflow-wrap: anywhere; }
 .step-output { overflow-x: hidden; overflow-y: auto; }
 .conv-head h2, .card-title, .detail dd, .msg .bubble { overflow-wrap: anywhere; }
 .msg.reply .bubble > p { white-space: normal; }
 .bubble table { table-layout: fixed; }
 .bubble th, .bubble td { overflow-wrap: anywhere; word-break: break-word; }
 .bubble code { overflow-wrap: anywhere; }
-.bubble pre { margin: 6px 0 8px; padding: 9px 11px; background: #070a0c; border: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.55; }
+.bubble pre { margin: 6px 0 8px; padding: 9px 11px; background: var(--code-bg); border: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.55; }
 .bubble pre code { color: var(--soft); font-size: inherit; }
 .bubble blockquote { margin: 4px 0 8px; padding: 2px 0 2px 12px; border-left: 2px solid var(--line-2); color: var(--soft); }
 .bubble hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 .bubble a { color: var(--teal); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
-.bubble em { font-style: italic; color: #e6edf0; }
+.bubble em { font-style: italic; color: var(--ink); }
 .bubble ol { padding-left: 22px; }
 .step details[open]:has(> .step-command) > summary .step-input { display: none; }
 
@@ -369,7 +415,7 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; margin: 14px 0 0; }
 .stats.tools { margin-top: 8px; }
 .stat { border: 1px solid var(--line); background: var(--panel); padding: 10px 12px; display: grid; gap: 2px; min-width: 0; }
-.stat b { font-size: 22px; font-weight: 700; color: #e6edf0; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.stat b { font-size: 22px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
 .stat span { font-size: 11.5px; color: var(--dim); overflow-wrap: anywhere; }
 .stat.live { border-color: var(--teal-line); }
 .stat.live b { color: var(--teal); }
@@ -442,7 +488,7 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 .back:hover { color: var(--teal); }
 #project-detail .card { margin-bottom: 8px; }
 .project-messages { overflow: visible; padding: 4px 0 12px; }
-#project-composer { position: sticky; bottom: 0; background: #000; padding: 10px 0 12px; margin: 0; border-top: 1px solid var(--line); }
+#project-composer { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0 12px; margin: 0; border-top: 1px solid var(--line); }
 
 /* --- search the conversation --- */
 .conversation { grid-template-rows: auto 1fr auto; position: relative; }
@@ -452,7 +498,7 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 .search-box .i { width: 15px; height: 15px; color: var(--dim); flex: none; }
 .search-box input { border: 0; background: transparent; padding: 7px 0; box-shadow: none; }
 .search-box input:focus { box-shadow: none; }
-.search-results { position: absolute; left: 14px; right: 14px; top: calc(100% + 4px); z-index: 5; max-height: 60vh; overflow-y: auto; overflow-x: hidden; background: #070a0c; border: 1px solid var(--line-2); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6); padding: 6px; display: grid; gap: 2px; }
+.search-results { position: absolute; left: 14px; right: 14px; top: calc(100% + 4px); z-index: 5; max-height: 60vh; overflow-y: auto; overflow-x: hidden; background: var(--code-bg); border: 1px solid var(--line-2); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6); padding: 6px; display: grid; gap: 2px; }
 .search-results[hidden] { display: none; }
 .search-count, .search-none { margin: 4px 8px; color: var(--dim); font-size: 12px; }
 .search-hit { display: grid; gap: 2px; text-align: left; border: 0; background: transparent; color: var(--soft); padding: 8px 10px; cursor: pointer; min-width: 0; }
@@ -460,7 +506,7 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 .search-head { display: flex; gap: 10px; font-size: 11.5px; color: var(--dim); }
 .search-head b { color: var(--teal); font-weight: 600; }
 .search-text { font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
-.search-text mark { background: rgba(242, 163, 58, 0.3); color: #fff; padding: 0 1px; }
+.search-text mark { background: rgba(242, 163, 58, 0.3); color: var(--strong); padding: 0 1px; }
 .msg.flash { animation: flash 1.6s ease-out; }
 @keyframes flash { 0%, 30% { background: rgba(95, 211, 209, 0.18); } 100% { background: transparent; } }
 .bulk-row { display: flex; align-items: center; gap: 10px; margin: 12px 0 6px; flex-wrap: wrap; }
@@ -523,7 +569,7 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
   .tools-view:not([hidden]) { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .tools-list { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; }
 }
-.tool-icon.drawn { background: color-mix(in srgb, var(--c) 8%, #0b0f12); border-color: color-mix(in srgb, var(--c) 45%, transparent); color: var(--c); }
+.tool-icon.drawn { background: color-mix(in srgb, var(--c) 8%, var(--panel)); border-color: color-mix(in srgb, var(--c) 45%, transparent); color: var(--c); }
 .tool-icon svg { width: 58%; height: 58%; }
 .tool-icon svg.brand { fill: currentColor; }
 .tool-icon svg.plain { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
@@ -531,42 +577,42 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 /* --- what an answer can show beyond words --- */
 .msg.attachment .bubble { grid-column: 2; justify-self: stretch; padding: 4px 0 0; background: none; border: 0; white-space: normal; }
 .msg.attachment .caption { margin-bottom: 8px; }
-.bubble .hljs-keyword, .bubble .hljs-selector-tag, .bubble .hljs-built_in, .bubble .hljs-type { color: #c792ea; }
-.bubble .hljs-string, .bubble .hljs-attr-value, .bubble .hljs-regexp, .bubble .hljs-addition { color: #a5d6a7; }
-.bubble .hljs-number, .bubble .hljs-literal, .bubble .hljs-symbol { color: #f2a33a; }
-.bubble .hljs-comment, .bubble .hljs-quote { color: #61707a; font-style: italic; }
-.bubble .hljs-title, .bubble .hljs-section, .bubble .hljs-function .hljs-title { color: #5fd3d1; }
-.bubble .hljs-attr, .bubble .hljs-attribute, .bubble .hljs-variable, .bubble .hljs-template-variable, .bubble .hljs-property { color: #8fb8ff; }
-.bubble .hljs-meta, .bubble .hljs-doctag, .bubble .hljs-tag { color: #7d8b88; }
-.bubble .hljs-deletion { color: #e5677d; }
+.bubble .hljs-keyword, .bubble .hljs-selector-tag, .bubble .hljs-built_in, .bubble .hljs-type { color: var(--hl-key); }
+.bubble .hljs-string, .bubble .hljs-attr-value, .bubble .hljs-regexp, .bubble .hljs-addition { color: var(--hl-str); }
+.bubble .hljs-number, .bubble .hljs-literal, .bubble .hljs-symbol { color: var(--amber); }
+.bubble .hljs-comment, .bubble .hljs-quote { color: var(--faint); font-style: italic; }
+.bubble .hljs-title, .bubble .hljs-section, .bubble .hljs-function .hljs-title { color: var(--teal); }
+.bubble .hljs-attr, .bubble .hljs-attribute, .bubble .hljs-variable, .bubble .hljs-template-variable, .bubble .hljs-property { color: var(--hl-attr); }
+.bubble .hljs-meta, .bubble .hljs-doctag, .bubble .hljs-tag { color: var(--dim); }
+.bubble .hljs-deletion { color: var(--red); }
 .bubble .math { color: var(--ink); }
 .bubble .math.block { display: block; margin: 8px 0; overflow-x: auto; text-align: center; font-size: 1.08em; }
 .bubble math { font-family: "Cambria Math", "STIX Two Math", "Latin Modern Math", serif; }
-.bubble .diagram { margin: 8px 0; padding: 10px; background: #070a0c; border: 1px solid var(--line); text-align: center; min-height: 40px; }
+.bubble .diagram { margin: 8px 0; padding: 10px; background: var(--code-bg); border: 1px solid var(--line); text-align: center; min-height: 40px; }
 .bubble .diagram:not(:has(img)):not(.failed)::before, .bubble .chart:not(:has(canvas)):not(.failed)::before { content: "绘制中…"; color: var(--dim, #7d8b88); font-size: 12px; }
 .bubble .diagram-img { max-width: 100%; height: auto; cursor: zoom-in; }
-.bubble .chart { margin: 8px 0; padding: 10px; background: #070a0c; border: 1px solid var(--line); }
+.bubble .chart { margin: 8px 0; padding: 10px; background: var(--code-bg); border: 1px solid var(--line); }
 .bubble .chart-frame { position: relative; height: 260px; width: 100%; }
 .bubble .failed { text-align: left; }
-.bubble .rich-error { color: #e5677d; font-size: 12px; margin-bottom: 4px; }
+.bubble .rich-error { color: var(--red); font-size: 12px; margin-bottom: 4px; }
 .bubble img.md-img { max-width: 100%; max-height: 420px; display: block; margin: 6px 0; cursor: zoom-in; border: 1px solid var(--line); }
 .file-card { border: 1px solid var(--line-2); background: var(--panel); margin: 6px 0; max-width: 100%; }
 .file-card .file-head { display: flex; align-items: center; gap: 10px; padding: 8px 10px; min-width: 0; }
 .file-card .file-badge { flex: none; font: 700 10px/1 var(--sans); letter-spacing: 0.06em; color: var(--teal); border: 1px solid var(--teal-line); padding: 5px 6px; }
 .file-card .file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13px; }
-.file-card .file-size { flex: none; color: #7d8b88; font-size: 11.5px; }
+.file-card .file-size { flex: none; color: var(--dim); font-size: 11.5px; }
 .file-card .file-actions { flex: none; display: flex; gap: 6px; }
 .file-card .file-body:empty { display: none; }
 .file-card .file-body { border-top: 1px solid var(--line); }
-.file-card .file-image { display: block; max-width: 100%; max-height: 480px; margin: 0 auto; cursor: zoom-in; background: #070a0c; }
+.file-card .file-image { display: block; max-width: 100%; max-height: 480px; margin: 0 auto; cursor: zoom-in; background: var(--code-bg); }
 .file-card .file-media { display: block; width: 100%; max-height: 420px; background: #000; }
 .file-card .file-audio { display: block; width: 100%; padding: 8px; box-sizing: border-box; }
 .file-card .file-table { max-height: 360px; overflow: auto; }
 .file-card .file-table table { margin: 0; }
 .file-card pre { margin: 0; border: 0; max-height: 360px; overflow: auto; }
-.file-card .file-more, .file-card .file-loading { color: #7d8b88; font-size: 11.5px; padding: 6px 10px; }
+.file-card .file-more, .file-card .file-loading { color: var(--dim); font-size: 11.5px; padding: 6px 10px; }
 .lightbox { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.88); display: flex; align-items: center; justify-content: center; cursor: zoom-out; padding: 24px; }
-.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; background: #0b0d0c; }
+.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; background: var(--panel); }
 /* Letters in a formula as plain italics: the math-italic code points need a math font a computer may not have. */
 .bubble math mi { text-transform: none; font-style: italic; }
 .bubble math mi[mathvariant="normal"] { font-style: normal; }
@@ -580,7 +626,7 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 .tray .chip-kind { font: 700 9.5px/1 var(--sans); color: var(--teal); border: 1px solid var(--teal-line); padding: 4px 4px; }
 .tray .chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tray .chip-x { background: none; border: 0; color: var(--dim); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 3px; }
-.tray .chip-x:hover { color: #e5677d; }
+.tray .chip-x:hover { color: var(--red); }
 #view-chat.dropping { outline: 2px dashed var(--teal-line); outline-offset: -6px; }
 .msg.user.with-files .sent-files { grid-column: 2; justify-self: end; width: min(100%, 360px); }
 .msg.user.with-files .sent-files .file-card { margin: 4px 0 0; }
@@ -619,3 +665,7 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 .file-card .file-head.opens:hover .file-name { color: var(--teal); }
 .file-card.readable .file-body { display: none; }
 .outline.amber-text { color: var(--amber); border-color: var(--amber-line); }
+/* --- day or night --- */
+.theme-choice { margin: 4px 0 18px; }
+/* A project's page keeps its way back in sight while its conversation scrolls. */
+#project-back { position: sticky; top: 0; z-index: 4; background: var(--bg); padding: 8px 0; width: 100%; text-align: left; border-bottom: 1px solid var(--line); }

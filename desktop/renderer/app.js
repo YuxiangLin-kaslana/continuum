@@ -330,6 +330,38 @@
     });
   });
 
+  // --- day or night: kept on this computer; "system" follows the computer's own setting as it changes ---
+
+  const THEME_KEY = 'continuum.theme';
+  const systemDark = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  function themeChoice() {
+    try { return localStorage.getItem(THEME_KEY) || 'dark'; } catch (_) { return 'dark'; }
+  }
+  function applyTheme(redraw) {
+    const choice = themeChoice();
+    const light = choice === 'light' || (choice === 'system' && systemDark && !systemDark.matches);
+    document.documentElement.dataset.theme = light ? 'light' : 'dark';
+    for (const b of document.querySelectorAll('[data-theme-choice]')) {
+      b.setAttribute('aria-checked', String(b.dataset.themeChoice === choice));
+      b.setAttribute('aria-selected', String(b.dataset.themeChoice === choice));
+    }
+    if (redraw) {
+      // Charts take their colors when drawn: draw the answers again in the new ones.
+      drawn.clear();
+      renderMessages();
+    }
+  }
+  for (const b of document.querySelectorAll('[data-theme-choice]')) {
+    b.addEventListener('click', () => {
+      try { localStorage.setItem(THEME_KEY, b.dataset.themeChoice); } catch (_) { /* this time only */ }
+      applyTheme(true);
+    });
+  }
+  if (systemDark && systemDark.addEventListener) {
+    systemDark.addEventListener('change', () => { if (themeChoice() === 'system') applyTheme(true); });
+  }
+  applyTheme(false);
+
   // --- what the person asked the assistant to remember ---
 
   async function loadMemories() {

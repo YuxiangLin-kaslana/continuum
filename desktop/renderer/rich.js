@@ -120,14 +120,16 @@
     try {
       await need('vendor/chart.umd.min.js');
       const Chart = window.Chart;
-      Chart.defaults.color = '#b9c4c1';
-      Chart.defaults.borderColor = 'rgba(255,255,255,0.08)';
+      // In the window's own colors, day or night.
+      const css = getComputedStyle(document.documentElement);
+      Chart.defaults.color = css.getPropertyValue('--soft').trim() || '#b9c4c1';
+      Chart.defaults.borderColor = css.getPropertyValue('--line').trim() || 'rgba(255,255,255,0.08)';
       Chart.defaults.font.family = 'Segoe UI, Microsoft YaHei, sans-serif';
       const round = ['pie', 'doughnut', 'polarArea'].includes(spec.type);
       (spec.data && spec.data.datasets || []).forEach((set, i) => {
         if (round) {
           set.backgroundColor = set.backgroundColor || (spec.data.labels || []).map((_, j) => PALETTE[j % PALETTE.length]);
-          set.borderColor = set.borderColor || '#0b0d0c';
+          set.borderColor = set.borderColor || getComputedStyle(document.documentElement).getPropertyValue('--panel').trim();
         } else {
           set.borderColor = set.borderColor || PALETTE[i % PALETTE.length];
           set.backgroundColor = set.backgroundColor || `${PALETTE[i % PALETTE.length]}${spec.type === 'line' ? '33' : 'cc'}`;
