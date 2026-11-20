@@ -80,3 +80,38 @@ def test_files_are_kept_by_an_unguessable_id_and_stay_within_their_size(tmp_path
         raise AssertionError("kept a file over the limit")
     except ValueError as error:
         assert "太大" in str(error)
+
+
+def test_a_file_in_the_persons_own_work_opens_by_its_path_and_nothing_else_on_the_host_does(tmp_path):
+    router = ScriptedModel(*[call("decide", decision="accept", title="清单", scope="写清单", acknowledgement="好。",
+                                  reason="r") for _ in range(2)])
+    worker = ScriptedModel(
+        call("write_file", path="清单.md", content="# 进度\n| 项 | 状态 |\n|---|---|\n| 发票 | 已改 |\n"),
+        lambda messages: call("report", state="ready", summary="写好了"),
+        lambda messages: call("report", state="ready", summary="bob 的"))
+
+    async def main():
+        rt = agent_runtime(tmp_path / "home", router, worker, sources={"app": {"kind": "app"}},
+                           policy={"sources": {"app": {"allowed": [{"id": "me"}, {"id": "bob"}]}}},
+                           api={"enabled": True, "port": 0})
+        me = {"Authorization": f"Bearer {rt.accounts.add('me')}"}
+        bob = {"Authorization": f"Bearer {rt.accounts.add('bob')}"}
+        ctx = rt.sources["app"]
+        port, runner = await serve(rt)
+        try:
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as c:
+                await c.post("/api/v1/threads/main/messages", headers=me, json={"text": "写个清单"})
+                await until(lambda: any(m["role"] == "reply" for m in ctx.kind.everything(ctx, "me")), timeout=15)
+                [ticket] = rt.store.tickets.list()
+                path = f"{ticket.execution.directory}/清单.md"
+                (tmp_path / "home" / "secret.txt").write_text("no")
+                get = lambda p, who=me: c.get("/api/v1/workfile", params={"path": p}, headers=who)  # noqa: E731
+                return (await get(path), await get(path, bob), await get(str(tmp_path / "home" / "secret.txt")),
+                        await get(f"{ticket.execution.directory}/../../secret.txt"), await get("/etc/passwd"))
+        finally:
+            runner.cancel()
+            await rt.close()
+
+    mine, theirs, outside, climbed, system = asyncio.run(main())
+    assert mine.status_code == 200 and "| 发票 | 已改 |" in mine.text and mine.headers["content-type"].startswith("text/markdown")
+    assert [r.status_code for r in (theirs, outside, climbed, system)] == [404, 404, 404, 404]

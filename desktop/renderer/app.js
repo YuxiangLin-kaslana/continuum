@@ -135,7 +135,11 @@
     // Code spans and links are set aside first, so nothing inside them is read as a mark.
     const kept = [];
     const keep = (html) => `\u0000${kept.push(html) - 1}\u0000`;
-    let out = text.replace(/`([^`]+)`/g, (_, code) => keep(`<code>${escape(code)}</code>`));
+    // A file on the server named by its full path opens in a preview; in code or not.
+    const pathLink = (path) => `<a class="path-link" href="#" data-path="${escape(path)}" title="点开预览">${escape(path)}</a>`;
+    let out = text.replace(/`([^`]+)`/g, (_, code) => keep(PATH_ONLY.test(code.trim())
+      ? `<code>${pathLink(code.trim())}</code>` : `<code>${escape(code)}</code>`));
+    out = out.replace(PATH_IN_TEXT, (_, before, path) => before + keep(pathLink(path)));
     // Formulas: $…$ (not a price: no space just inside, no digit right after) and \(…\).
     out = out.replace(/\\\((.+?)\\\)/g, (_, tex) => keep(`<span class="math" data-tex="${escape(tex)}"></span>`));
     out = out.replace(/(^|[^\\$\w])\$([^\s$](?:[^$\n]*?[^\s$\\])?)\$(?![\w$])/g,
@@ -151,6 +155,9 @@
       .replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, '$1<em>$2</em>');
     return out.replace(/\u0000(\d+)\u0000/g, (_, n) => kept[Number(n)]);
   }
+  // A file path worth opening: absolute, under a home or the usual places, ending in a name with an extension.
+  const PATH_ONLY = /^\/(?:home|root|srv|opt|tmp|var|data|mnt)\/[^\s<>"'`]*[^\s<>"'`/]\.[A-Za-z0-9]{1,8}$/;
+  const PATH_IN_TEXT = /(^|[\s(（"'“：:])(\/(?:home|root|srv|opt|tmp|var|data|mnt)\/[^\s<>"'`，。；：！？）)]*[^\s<>"'`，。；：！？）)/]\.[A-Za-z0-9]{1,8})(?=$|[\s，。；：！？）),.;:!?"'”])/g;
   const ROW = /^\s*\|.*\|\s*$/;
   const RULE = /^\s*\|[\s:|-]+\|\s*$/;
   const ITEM = /^\s*([-*•+]|\d+[.)])\s+/;
@@ -306,6 +313,22 @@
     if (api.workers) loadWorkers();
     loadInject();
   }
+
+  // --- a file named in an answer: opened in a preview over the conversation ---
+
+  document.addEventListener('click', (event) => {
+    const link = event.target.closest && event.target.closest('a.path-link');
+    if (!link) return;
+    event.preventDefault();
+    const path = link.dataset.path;
+    const name = path.split('/').pop();
+    Rich.preview({
+      name, path, markdown, onError: showStatus,
+      load: () => call('workfile', path),
+      open: () => call('openWorkfile', path),
+      save: () => call('saveWorkfile', path),
+    });
+  });
 
   // --- what the person asked the assistant to remember ---
 

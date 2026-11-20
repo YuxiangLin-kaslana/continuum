@@ -11,6 +11,7 @@ import json
 import re
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -24,7 +25,7 @@ from continuum.core.stage import can_retry, ticket_stage
 
 from continuum.plugins.cli_agents import resolve
 
-from .files import MAX_UPLOAD, Files
+from .files import MAX_FILE, MAX_UPLOAD, Files, kind_of
 from .integrations import EMAIL_PRESETS, IntegrationError
 from .projects import project_of_thread
 from .ssh import APPROVALS, Host, survey
@@ -299,6 +300,25 @@ def create_app(rt: Runtime) -> FastAPI:
         path, meta = found
         return FileResponse(path, media_type=meta["mime"], filename=meta["name"], content_disposition_type="inline",
                             headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+    # A file a worker wrote in its workspace, named by its path in an answer: the person may open it. Only the
+    # workspaces of their own work (a ticket's, a project's); anything else on this host is as missing.
+    @app.get("/api/v1/workfile")
+    async def workfile(path: str = Query(min_length=1, max_length=1000), user: str = Depends(user_of)) -> FileResponse:
+        target = Path(path).expanduser()
+        try:
+            target = target.resolve(strict=True)
+        except (OSError, RuntimeError):
+            raise HTTPException(404, "没有这个文件") from None
+        roots = [Path(t.execution.directory).resolve() for t in rt.store.tickets.list()
+                 if t.execution and t.mandate.actor.id == user]
+        roots += [rt.projects.workspace(p).resolve() for p in rt.projects.list(user)]
+        if not target.is_file() or not any(target == r or r in target.parents for r in roots):
+            raise HTTPException(404, "没有这个文件")
+        if target.stat().st_size > MAX_FILE:
+            raise HTTPException(413, f"文件太大，最多 {MAX_FILE // 1024 // 1024} MB")
+        return FileResponse(target, media_type=kind_of(target.name), filename=target.name,
+                            content_disposition_type="inline")
 
     @app.get("/api/v1/steps")
     async def all_steps(user: str = Depends(user_of)) -> list[dict[str, Any]]:

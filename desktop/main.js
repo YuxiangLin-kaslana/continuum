@@ -236,6 +236,28 @@ handle('file:save', async (id, name) => {
   fs.writeFileSync(chosen.filePath, data);
   return chosen.filePath;
 });
+const workRoute = (filePath) => `/api/v1/workfile?path=${encodeURIComponent(String(filePath))}`;
+handle('api:workfile', async (filePath) => {
+  const { mime, data } = await client.download(workRoute(filePath));
+  return { mime, data: data.toString('base64') };
+});
+handle('workfile:open', async (filePath) => {
+  const { data } = await client.download(workRoute(filePath));
+  const folder = path.join(app.getPath('temp'), 'continuum-files', 'work');
+  fs.mkdirSync(folder, { recursive: true });
+  const target = path.join(folder, fileName(path.posix.basename(String(filePath))));
+  fs.writeFileSync(target, data);
+  const problem = await shell.openPath(target);
+  if (problem) throw new Error(problem);
+  return true;
+});
+handle('workfile:save', async (filePath) => {
+  const chosen = await dialog.showSaveDialog(win, { defaultPath: fileName(path.posix.basename(String(filePath))) });
+  if (chosen.canceled || !chosen.filePath) return null;
+  const { data } = await client.download(workRoute(filePath));
+  fs.writeFileSync(chosen.filePath, data);
+  return chosen.filePath;
+});
 handle('api:sshProfile', (name) => client.request('POST', `/api/v1/ssh/hosts/${encodeURIComponent(name)}/profile`));
 handle('api:stop', (id) => client.request('POST', `/api/v1/tickets/${encodeURIComponent(id)}/stop`, {}));
 handle('api:retry', (id) => client.request('POST', `/api/v1/tickets/${encodeURIComponent(id)}/retry`));

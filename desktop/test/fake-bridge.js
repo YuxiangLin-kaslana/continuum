@@ -112,6 +112,7 @@
   const files = {};
   window.__fake = { fire, messages, projects, steps, hold: false, files, opened: [], uploadedNames: {},
     inject: { available: true, name: 'Dsh全破.md', chars: 12000, enabled: false },
+    workfiles: {},
     memories: [{ id: 'a1b2', text: '尽量用 Claude Code，不行再用 Codex', at: new Date().toISOString(), by: 't-9' }],
     release: () => { passes++; },
     gates: () => ({ passes, pauses }),
@@ -303,6 +304,12 @@
       sshHosts.sort((a, b) => a.name.localeCompare(b.name));
       return ok({ ...row });
     },
+    workfile: (path) => {
+      const found = window.__fake.workfiles[path];
+      return found ? ok({ ...found }) : Promise.resolve({ ok: false, status: 404, error: '没有这个文件' });
+    },
+    openWorkfile: (path) => { window.__fake.opened.push(['open-work', path]); return ok(true); },
+    saveWorkfile: (path) => { window.__fake.opened.push(['save-work', path]); return ok('C:/x'); },
     memories: () => ok(window.__fake.memories.map((m) => ({ ...m }))),
     remember: (text) => {
       const m = { id: `m${window.__fake.memories.length + 1}`, text, at: now(), by: 'person' };

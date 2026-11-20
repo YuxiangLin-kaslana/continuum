@@ -296,5 +296,83 @@
     return box;
   }
 
-  window.Rich = { enhance, fileCard, lightbox };
+  // --- a file named in an answer, opened over the conversation: a document laid out, a table, a picture, code ---
+
+  async function preview({ name, path, load, markdown, open, save, onError }) {
+    const shade = el('div', 'preview');
+    const panel = el('div', 'preview-panel');
+    const head = el('div', 'preview-head');
+    const title = el('div', 'preview-title');
+    title.append(el('b', '', name), el('span', 'preview-path', path || ''));
+    const actions = el('div', 'preview-actions');
+    const button = (label, fn, cls = 'outline small') => {
+      const b = el('button', cls, label);
+      b.type = 'button';
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        try { await fn(); } catch (error) { onError(error.message); }
+        b.disabled = false;
+      });
+      actions.append(b);
+    };
+    const close = () => { shade.remove(); document.removeEventListener('keydown', onKey); };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    if (open) button('打开', open);
+    if (save) button('另存为', save);
+    button('关闭', close, 'outline small close');
+    head.append(title, actions);
+    const body = el('div', 'preview-body bubble');
+    body.append(el('div', 'file-loading', '加载中…'));
+    panel.append(head, body);
+    shade.append(panel);
+    shade.addEventListener('click', (event) => { if (event.target === shade) close(); });
+    document.addEventListener('keydown', onKey);
+    document.body.append(shade);
+    try {
+      const { mime, data } = await load();
+      const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: mime });
+      const ext = (name.split('.').pop() || '').toLowerCase();
+      if (mime.startsWith('image/')) {
+        const img = el('img', 'file-image');
+        img.src = URL.createObjectURL(blob);
+        img.alt = name;
+        body.replaceChildren(img);
+      } else if (/^(video|audio)\//.test(mime)) {
+        const media = el(mime.startsWith('video/') ? 'video' : 'audio', 'file-media');
+        media.controls = true;
+        media.src = URL.createObjectURL(blob);
+        body.replaceChildren(media);
+      } else if (ext === 'md' || ext === 'markdown' || mime === 'text/markdown') {
+        const doc = el('div', 'preview-doc');
+        doc.innerHTML = markdown(await blob.text()).html;
+        body.replaceChildren(doc);
+        enhance(doc);
+      } else if (ext === 'csv' || ext === 'tsv' || mime.startsWith('text/csv')) {
+        const rows = csvRows(await blob.text(), 2001);
+        const table = el('table');
+        rows.slice(0, 2000).forEach((cells, i) => {
+          const tr = el('tr');
+          for (const c of cells) tr.append(el(i ? 'td' : 'th', '', c));
+          table.append(tr);
+        });
+        body.replaceChildren(table);
+        if (rows.length > 2000) body.append(el('div', 'file-more', '只显示前 2000 行'));
+      } else if (TEXT.test(mime) || CODE_EXT.test(name) || mime === 'application/octet-stream' && blob.size < 2e6) {
+        const pre = el('pre');
+        const code = el('code', '', await blob.text());
+        code.dataset.lang = LANGS[ext] || ext;
+        pre.append(code);
+        body.replaceChildren(pre);
+        highlight(body);
+      } else {
+        body.replaceChildren(el('div', 'file-more', '这种文件不能在这里预览，点“打开”用电脑上的程序看。'));
+      }
+    } catch (error) {
+      body.replaceChildren(el('div', 'rich-error', `打不开：${error.message}`));
+    }
+    return shade;
+  }
+
+  window.Rich = { enhance, fileCard, lightbox, preview };
 })();

@@ -197,6 +197,7 @@ PRESENT_RULES = """
 - 数值的趋势、对比、占比用 ```chart 代码块，内容是 Chart.js 的配置 JSON（type 用 bar / line / pie / doughnut 等，
   data 里写 labels 和 datasets）。只写 JSON，不要写函数。
 - 数学公式用 $...$（行内）或 $$...$$（单独一行）。
+- 提到这台机器上的文件（报告、清单、表格）时写完整的绝对路径（/home/... 开头），人能在 App 里直接点开预览。
 - 你生成或找到的图片、截图、PDF、表格、音视频等文件，用 show_file 直接发给人（比如用 Python 画的图、网页截图、
   服务器上的报告文件），不要只告诉他路径。
 """

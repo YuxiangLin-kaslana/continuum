@@ -710,6 +710,27 @@ def test_answers_draw_code_formulas_diagrams_charts_and_the_files_the_assistant_
         page.wait_for_selector(".lightbox img")
         page.keyboard.press("Escape")
         page.wait_for_selector(".lightbox", state="detached")
+        # A file named by its path in an answer opens over the conversation, laid out.
+        doc = "# PP ERP 修改进度\n\n| 项 | 状态 |\n|---|---|\n| 开票日期 | 已改 |\n| AP 对账 | 部分 |\n"
+        page.evaluate("""d => { window.__fake.workfiles['/home/ec2-user/continuum-home/work/pp-erp/PP-ERP-修改进度.md'] =
+            { mime: 'text/markdown', data: btoa(String.fromCharCode(...new TextEncoder().encode(d))) }; }""", doc)
+        page.evaluate("window.__fake.say('t-4', 'reply', '清单在 `/home/ec2-user/continuum-home/work/pp-erp/PP-ERP-修改进度.md`，"
+                      "原始数据在 /home/ec2-user/continuum-home/work/pp-erp/check.md。', 't-4')")
+        links = page.locator(".msg.reply a.path-link")
+        assert links.count() == 2 and links.nth(1).inner_text() == "/home/ec2-user/continuum-home/work/pp-erp/check.md"
+        links.first.click()
+        page.wait_for_selector(".preview .preview-doc table")
+        assert page.locator(".preview .preview-doc td").all_inner_texts() == ["开票日期", "已改", "AP 对账", "部分"]
+        assert page.inner_text(".preview-title b") == "PP-ERP-修改进度.md"
+        page.locator(".preview >> text=打开").click()
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/desktop-preview.png")
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".preview", state="detached")
+        links.nth(1).click()  # one that is not there says so
+        page.wait_for_selector(".preview .rich-error >> text=没有这个文件")
+        page.locator(".preview >> text=关闭").click()
+        page.wait_for_selector(".preview", state="detached")
         # A redraw keeps what was drawn.
         drawn = page.evaluate("document.querySelector('.chart canvas') !== null && "
                               "(window.__keep = document.querySelector('.chart canvas'), true)")
