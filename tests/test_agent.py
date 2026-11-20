@@ -519,3 +519,31 @@ def test_a_message_already_in_a_tickets_thread_is_not_forwarded_round_again(tmp_
     outcome = asyncio.run(ModelRouter().assess(ctx, candidate))
     assert type(outcome).__name__ == "Accept"
     assert "已有的工单" in seen[0][1]["content"] and "forward" not in seen[0][0]["content"].split("ignore：")[0]
+
+
+def test_a_long_command_runs_as_long_as_the_worker_says_and_a_cut_one_says_how_to_go_on(tmp_path):
+    """Seen live: commands stopped at five minutes, so a render went to the background and the worker slept blind in
+    fixed naps. Now it says how long to wait (up to an hour), and a command cut short says to wait longer instead."""
+    from continuum.plugins.agent_executor import MAX_WAIT, _wait
+
+    assert _wait({}, 300) == 300 and _wait({"timeout_seconds": 1800}, 300) == 1800
+    assert _wait({"timeout_seconds": 99999}, 300) == MAX_WAIT and _wait({"timeout_seconds": "x"}, 300) == 300
+    router = ScriptedModel(call("decide", decision="accept", title="渲染", scope="渲染", acknowledgement="好。", reason="r"))
+    worker = ScriptedModel(
+        call("shell", command="sleep 3; echo slow", timeout_seconds=1),
+        call("shell", command="sleep 2; echo done", timeout_seconds=10),
+        lambda messages: call("report", state="ready", summary=" | ".join(
+            m["content"].splitlines()[-1] for m in messages if m["role"] == "tool")))
+
+    async def main():
+        rt = agent_runtime(tmp_path, router, worker)
+        try:
+            post(tmp_path, "渲染一下")
+            await drive(rt, lambda: len(replies(tmp_path)) == 2, timeout=20)
+        finally:
+            await rt.close()
+
+    asyncio.run(main())
+    cut, done = replies(tmp_path)[-1][1].split(" | ")
+    assert "超过 1 秒" in cut and "timeout_seconds 设大" in cut and "不要改成后台加 sleep" in cut
+    assert done == "done"
