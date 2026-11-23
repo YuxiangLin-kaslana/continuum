@@ -579,6 +579,19 @@
     return state.view === 'chat' || (state.view === 'projects' && state.focus !== null && project === state.focus);
   }
 
+  // Redraws asked for by what happens elsewhere (steps, thinking) come together: one draw for a burst of them.
+  let renderSoon = null;
+  function scheduleRender() {
+    if (renderSoon) return;
+    renderSoon = setTimeout(() => { renderSoon = null; renderMessages(); }, 150);
+  }
+  // Whether a change to a project's work shows where the person is looking: on its own page all of it does; in the
+  // main conversation only a command waiting for them.
+  function shows(project, approval) {
+    if (!visible(project)) return false;
+    return timelineBox()?.box !== $('messages') || approval;
+  }
+
   function addMessage(row, render = true) {
     state.messages.set(row.id, row);
     // The answer arrived: what was being written gives way to it.
@@ -632,7 +645,6 @@
   function message(m) {
     if (m.role === 'proposal') return proposal(m);
     if (m.role === 'credential') return credential(m);
-    if (m.role !== 'reply' && m.role !== 'attachment') return plainMessage(m);
     const key = `${m.id}|${m.text}|${JSON.stringify(m.meta || {})}|${timelineBox()?.box === $('messages')}`;
     const kept = drawn.get(m.id);
     if (kept && kept.key === key) return arrival(kept.node, `m:${m.id}`);
@@ -925,7 +937,9 @@
     for (const other of [$('messages'), $('project-messages')]) if (other !== box) other.replaceChildren();
     const near = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 60;
     const list = [...state.messages.values()].filter((m) => visible(m.project)).sort((a, b) => a.id - b.id);
-    const steps = [...state.steps.values()].filter((s) => visible(s.project));
+    // The main conversation shows a step only while it waits for the person; a project's page shows them all.
+    const main = box === $('messages');
+    const steps = [...state.steps.values()].filter((s) => visible(s.project) && (!main || s.status === 'approval'));
     // Messages and steps in the order they happened; the steps of one ticket in a row share a box.
     const timeline = [...list.map((m) => ({ at: m.at, m })), ...steps.map((s) => ({ at: s.at, s }))]
       .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
@@ -1080,7 +1094,10 @@
     }
   });
 
+  // The box grows with what is typed by itself (field-sizing); measuring it here at every key made the browser lay
+  // out the whole conversation again each time.
   function autosize() {
+    if (CSS.supports && CSS.supports('field-sizing', 'content')) return;
     const input = $('input');
     input.style.height = 'auto';
     input.style.height = `${Math.min(input.scrollHeight + 2, 160)}px`;
@@ -2141,19 +2158,23 @@
       if (['proposal', 'notice', 'reminder', 'scheduled'].includes(event.message.role)) projectsChanged();
     } else if (event.type === 'message-updated') {
       state.messages.set(event.message.id, event.message);
-      renderMessages();
+      scheduleRender();
     } else if (event.type === 'ticket') {
       projectsChanged();
       workersChanged();
-      if (event.ticket.stage !== 'working' && state.thinking.delete(event.ticket.id)) renderMessages();
+      if (event.ticket.stage !== 'working' && state.thinking.delete(event.ticket.id) && shows(event.ticket.project, false)) {
+        scheduleRender();
+      }
     } else if (event.type === 'step') {
       const step = event.step;
-      state.steps.set(`${step.ticket_id}:${step.key}`, step);
-      if (visible(step.project)) renderMessages();
+      const key = `${step.ticket_id}:${step.key}`;
+      const waited = (state.steps.get(key) || {}).status === 'approval';
+      state.steps.set(key, step);
+      if (shows(step.project, waited || step.status === 'approval')) scheduleRender();
       if (state.view === 'projects' && state.seg === 'workers') workersChanged();
     } else if (event.type === 'thinking') {
       state.thinking.set(event.ticket_id, event.project);
-      if (visible(event.project)) renderMessages();
+      if (shows(event.project, false)) scheduleRender();
     } else if (event.type === 'idle') {
       state.thinking.delete(event.ticket_id);
       // An answer that was being written but never arrived as a message (the turn ended some other way) goes too.
@@ -2161,7 +2182,7 @@
       lingering.set(event.ticket_id, setTimeout(() => {
         if (state.streams.delete(event.ticket_id)) renderMessages();
       }, 15000));
-      if (visible(event.project)) renderMessages();
+      if (shows(event.project, false)) scheduleRender();
     } else if (event.type === 'stream' && !event.text) {
       // What was being written turned out to be the worker talking as it works; it shows as a step instead.
       if (state.streams.delete(event.ticket_id) && visible(event.project)) renderMessages();

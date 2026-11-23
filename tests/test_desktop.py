@@ -762,14 +762,24 @@ def test_answers_draw_code_formulas_diagrams_charts_and_the_files_the_assistant_
         page.evaluate("window.__fake.say('t-4', 'reply', '好的', 't-4')")
         page.wait_for_selector(".msg.reply >> text=好的")
         assert drawn and page.evaluate("document.querySelector('.chart canvas') === window.__keep")
+        # Work going on elsewhere leaves the conversation untouched (seen live: with a long conversation, each of a
+        # worker's steps redrew all of it, and typing lagged).
+        page.evaluate("""() => { window.__changes = 0;
+            new MutationObserver((m) => { window.__changes += m.length; })
+              .observe(document.getElementById('messages'), { childList: true, subtree: true }); }""")
+        for n in range(20):
+            page.evaluate(f"window.__fake.fire('event', {{ type: 'step', step: {{ ticket_id: 't-2', project: 't-2', key: 'q{n}',"
+                          f" name: 'shell', input: 'ls', output: '', status: 'running', at: new Date().toISOString() }} }})")
+            page.evaluate("window.__fake.fire('event', { type: 'thinking', ticket_id: 't-2', project: 't-2' })")
+        page.wait_for_timeout(400)
+        assert page.evaluate("window.__changes") == 0
         # Kept, it does not slide in again at each redraw (seen live: it flickered while other work went on).
         for _ in range(3):
             page.evaluate("window.__fake.fire('event', { type: 'step', step: { ticket_id: 't-2', key: 'k' + Math.random(),"
                           " name: 'shell', input: 'ls', output: '', status: 'running', at: new Date().toISOString() } })")
             page.wait_for_timeout(50)
         assert "arrived" not in answer.get_attribute("class").split()
-        assert page.evaluate("document.getAnimations().filter(a => a.effect && a.effect.target"
-                             " && a.effect.target.matches('.msg.reply')).length") == 0
+        assert answer.evaluate("node => node.getAnimations().length") == 0
         if SHOTS:
             answer.screenshot(path=f"{SHOTS}/desktop-rich-answer.png")
             files.screenshot(path=f"{SHOTS}/desktop-rich-files.png")

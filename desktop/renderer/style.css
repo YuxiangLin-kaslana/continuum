@@ -671,3 +671,6 @@ html, body, #app, .main, .view, .messages, .tickets { overflow-x: hidden; }
 #project-back { position: sticky; top: 0; z-index: 4; background: var(--bg); padding: 8px 0; width: 100%; text-align: left; border-bottom: 1px solid var(--line); }
 /* The search: a button in the title bar until it is wanted; open, the box sits above the conversation. */
 .chat-tools.collapsed { display: none; }
+/* Typing stays light: the box sizes itself, and each message lays itself out apart from the rest. */
+.composer textarea { field-sizing: content; }
+.messages > li { contain: layout style; }
